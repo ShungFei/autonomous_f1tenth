@@ -123,6 +123,12 @@ def spawn_func(context, *args, **kwargs):
             executable='image_bridge',
             arguments=['/f1tenth/d435/color/image_raw'],
             output='screen',
+        ),
+        Node(
+            package='ros_gz_image',
+            executable='image_bridge',
+            arguments=['/f1tenth/d435/depth/image_rect_raw'],
+            output='screen',
         )
     ]
 

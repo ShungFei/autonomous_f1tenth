@@ -1,4 +1,4 @@
-<?xml version="1.0" ?>
+<?xml version="1.0"?>
 <sdf version="1.6">
   <world name="empty">
     <physics name="1ms" type="ignored">
@@ -22,10 +22,10 @@
       name="gz::sim::systems::Contact">
     </plugin>
     <plugin
-        filename="gz-sim-sensors-system"
-        name="gz::sim::systems::Sensors">
-        <render_engine>ogre2</render_engine>
-      </plugin>
+      filename="gz-sim-sensors-system"
+      name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
 
     <light type="directional" name="sun">
       <cast_shadows>true</cast_shadows>
@@ -142,7 +142,7 @@
       </link>
     </model>
 
-     <model name="box_blue">
+    <model name="box_blue">
       <pose>2 -2 0.5 0 0 0</pose>
       <link name="box_link">
         <inertial>

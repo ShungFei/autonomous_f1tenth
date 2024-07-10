@@ -42,7 +42,6 @@ def spawn_model_from_xacro(xacro_file, name, x, y, z, R, P, Y, **kwargs):
         output='screen'
     )
 
-# xacro.process_file(xacro_file, mappings={"robot_name": {name}}).toxml()
 def spawn_func(context, *args, **kwargs):
     pkg_ros_gz_sim = get_package_share_directory('ros_gz_sim')
     pkg_environments = get_package_share_directory('environments')
@@ -99,7 +98,8 @@ def spawn_func(context, *args, **kwargs):
                 f'/model/{name}/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist',
                 f'/{name}/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan',
                 f'/{name}/d435/color/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
-                # f'/color/image_raw@sensor_msgs/msg/Image@gz.msgs.Image',
+                f'/{name}/zed2/left/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+                f'/{name}/zed2/right/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
                 f'/model/{name}/odometry@nav_msgs/msg/Odometry@gz.msgs.Odometry',
                 f'/model/{name}/odometry_with_covariance@nav_msgs/msg/Odometry@gz.msgs.OdometryWithCovariance',
                 # f'/model/{name}/tf@tf2_msgs/msg/TFMessage@gz.msgs.Pose_V',
@@ -119,10 +119,10 @@ def spawn_func(context, *args, **kwargs):
             ]
         ),
         Node(
-            package='ros_gz_image',
-            executable='image_bridge',
-            arguments=['/f1tenth/d435/color/image_raw'],
-            output='screen',
+             package='ros_gz_image',
+             executable='image_bridge',
+             arguments=['/f1tenth/d435/color/image_raw'],
+             output='screen',
         ),
         Node(
             package='ros_gz_image',
@@ -130,6 +130,18 @@ def spawn_func(context, *args, **kwargs):
             arguments=['/f1tenth/d435/depth/image_rect_raw'],
             output='screen',
         )
+        # Node(
+        #     package='ros_gz_image',
+        #     executable='image_bridge',
+        #     arguments=['/f1tenth/zed2/left/image_raw'],
+        #     output='screen',
+        # ),
+        # Node(
+        #     package='ros_gz_image',
+        #     executable='image_bridge',
+        #     arguments=['/f1tenth/zed2/right/image_raw'],
+        #     output='screen',
+        # ),
     ]
 
 

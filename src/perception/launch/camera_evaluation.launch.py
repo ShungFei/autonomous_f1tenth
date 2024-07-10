@@ -45,7 +45,6 @@ def spawn_model_from_xacro(xacro_file, name, x, y, z, R, P, Y, **kwargs):
 def spawn_func(context, *args, **kwargs):
     pkg_ros_gz_sim = get_package_share_directory('ros_gz_sim')
     pkg_environments = get_package_share_directory('environments')
-    pkg_controllers = get_package_share_directory('controllers')
 
     description_pkg_path = os.path.join(get_package_share_directory('f1tenth_description'))
     xacro_file = os.path.join(description_pkg_path, 'urdf', 'robot.urdf.xacro')
@@ -78,7 +77,7 @@ def spawn_func(context, *args, **kwargs):
     return [
         gz_sim,
         Node(
-            package ='controllers',
+            package ='perception',
             executable='localize',
             name='localize',
             output='screen',

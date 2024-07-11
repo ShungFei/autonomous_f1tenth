@@ -42,6 +42,64 @@ def spawn_model_from_xacro(xacro_file, name, x, y, z, R, P, Y, **kwargs):
         output='screen'
     )
 
+def stereo_nodes(name, camera_name, opponent_name):
+    print(name, camera_name, opponent_name)
+    return [
+        Node(
+            package ='perception',
+            executable='stereo_localize',
+            name='stereo_localize',
+            output='screen',
+            parameters=[{
+                'agent_name': name,
+                'camera_name': camera_name,
+                'opponent_name': opponent_name
+            }],
+            emulate_tty=True
+        ),
+        Node(
+            package='ros_gz_image',
+            executable='image_bridge',
+            arguments=[f'{name}/{camera_name}/left/image_raw'],
+            output='screen',
+        ),
+        Node(
+            package='ros_gz_image',
+            executable='image_bridge',
+            arguments=[f'{name}/{camera_name}/right/image_raw'],
+            output='screen',
+        ),
+    ]
+
+def monocular_nodes(name, camera_name, opponent_name):
+    print(name, camera_name, opponent_name)
+    return [
+        Node(
+            package ='perception',
+            executable='localize',
+            name='localize',
+            output='screen',
+            parameters=[{
+                'agent_name': name,
+                'camera_name': camera_name,
+                'opponent_name': opponent_name
+            }],
+            emulate_tty=True
+        ),
+        Node(
+            package='ros_gz_image',
+            executable='image_bridge',
+            arguments=[f'/{name}/{camera_name}/color/image_raw'],
+            output='screen',
+        ),
+        Node(
+            package='ros_gz_image',
+            executable='image_bridge',
+            arguments=[f'{name}/{camera_name}/depth/image_rect_raw'],
+            output='screen',
+        )
+    ]
+
 def spawn_func(context, *args, **kwargs):
     pkg_ros_gz_sim = get_package_share_directory('ros_gz_sim')
     pkg_environments = get_package_share_directory('environments')
@@ -60,7 +118,9 @@ def spawn_func(context, *args, **kwargs):
     world = LaunchConfiguration('world').perform(context)
     name = LaunchConfiguration('name').perform(context)
     camera_name = LaunchConfiguration('camera_name').perform(context)
+    stereo_camera_name = LaunchConfiguration('stereo_camera_name').perform(context)
     opponent_name = LaunchConfiguration('opponent_name').perform(context)
+    is_stereo = LaunchConfiguration('stereo').perform(context)
 
     x = LaunchConfiguration('x').perform(context)
     y = LaunchConfiguration('y').perform(context)
@@ -68,27 +128,11 @@ def spawn_func(context, *args, **kwargs):
 
     R = LaunchConfiguration('R').perform(context)
     P = LaunchConfiguration('P').perform(context)
-
     Y = LaunchConfiguration('Y').perform(context)
-
-    # with open("test.txt", 'w') as f:
-    #     f.write(xacro.process_file(xacro_file, mappings={"robot_name": name, "add_camera":"true", "add_aruco":"true"}).toxml())
 
     return [
         gz_sim,
-        Node(
-            package ='perception',
-            executable='localize',
-            name='localize',
-            output='screen',
-            parameters=[{
-                'agent_name': name,
-                'camera_name': camera_name,
-                'opponent_name': opponent_name
-            }],
-            emulate_tty=True
-        ),
-        *spawn_model_from_xacro(xacro_file, name, x, y, z, R, P, Y, add_camera="true", camera_name="d435"),
+        *spawn_model_from_xacro(xacro_file, name, x, y, z, R, P, Y, add_camera="true", camera_name="d435", use_stereo=is_stereo),
         *spawn_model_from_xacro(xacro_file, opponent_name, 0, 0, 0, 0, 0, 0, add_aruco="true"),
         Node(
             package='ros_gz_bridge',
@@ -96,14 +140,12 @@ def spawn_func(context, *args, **kwargs):
             arguments=[
                 f'/model/{name}/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist',
                 f'/{name}/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan',
-                f'/{name}/d435/color/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
-                f'/{name}/zed2/left/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
-                f'/{name}/zed2/right/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+                f'/{name}/{camera_name}/color/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+                f'/{name}/{stereo_camera_name}/left/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+                f'/{name}/{stereo_camera_name}/right/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
                 f'/model/{name}/odometry@nav_msgs/msg/Odometry@gz.msgs.Odometry',
                 f'/model/{name}/odometry_with_covariance@nav_msgs/msg/Odometry@gz.msgs.OdometryWithCovariance',
-                # f'/model/{name}/tf@tf2_msgs/msg/TFMessage@gz.msgs.Pose_V',
                 f'/world/{world}/model/{name}/joint_state@sensor_msgs/msg/JointState@gz.msgs.Model',
-                # f'/world/{world}/pose/info@tf2_msgs/msg/TFMessage@gz.msgs.Pose_V',
                 f'/model/{name}/pose@tf2_msgs/msg/TFMessage@gz.msgs.Pose_V',
                 f'/model/{opponent_name}/pose@tf2_msgs/msg/TFMessage@gz.msgs.Pose_V',
             ],
@@ -114,33 +156,9 @@ def spawn_func(context, *args, **kwargs):
                 (f'/model/{name}/odometry', f'/{name}/odometry'),
                 (f'/model/{name}/odometry_with_covariance', f'/{name}/odometry_with_covariance'),
                 (f'/world/{world}/model/{name}/joint_state', f'/{name}/joint_states'),
-                # (f'/model/{name}/tf', '/tf'),
             ]
         ),
-        Node(
-             package='ros_gz_image',
-             executable='image_bridge',
-             arguments=['/f1tenth/d435/color/image_raw'],
-             output='screen',
-        ),
-        Node(
-            package='ros_gz_image',
-            executable='image_bridge',
-            arguments=['/f1tenth/d435/depth/image_rect_raw'],
-            output='screen',
-        )
-        # Node(
-        #     package='ros_gz_image',
-        #     executable='image_bridge',
-        #     arguments=['/f1tenth/zed2/left/image_raw'],
-        #     output='screen',
-        # ),
-        # Node(
-        #     package='ros_gz_image',
-        #     executable='image_bridge',
-        #     arguments=['/f1tenth/zed2/right/image_raw'],
-        #     output='screen',
-        # ),
+        *(monocular_nodes(name, camera_name, opponent_name) if is_stereo == 'false' else stereo_nodes(name, stereo_camera_name, opponent_name)),
     ]
 
 
@@ -163,10 +181,22 @@ def generate_launch_description():
         default_value='d435'
     )
 
+    stereo_camera_name_arg = DeclareLaunchArgument(
+        name='stereo_camera_name',
+        description='name of stereo camera mounted on agent robot',
+        default_value='zed2'
+    )
+
     opponent_name_arg = DeclareLaunchArgument(
         name='opponent_name',
         description='name of opponent robot spawned',
         default_value='opponent'
+    )
+
+    stereo_arg = DeclareLaunchArgument(
+        name='stereo',
+        description='stereo camera or not',
+        default_value='false'
     )
 
     x = DeclareLaunchArgument(
@@ -209,7 +239,9 @@ def generate_launch_description():
         SetEnvironmentVariable(name='GZ_SIM_RESOURCE_PATH', value=pkg_f1tenth_description[:-19]),
         world_arg,
         name_arg,
+        stereo_arg,
         camera_name_arg,
+        stereo_camera_name_arg,
         opponent_name_arg,
         x,
         y,

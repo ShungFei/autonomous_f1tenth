@@ -1,9 +1,8 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CameraInfo 
-from std_msgs.msg import String
 from tf2_msgs.msg import TFMessage
-from geometry_msgs.msg import TransformStamped, Vector3Stamped, Vector3
+from geometry_msgs.msg import Vector3Stamped
 from cv_bridge import CvBridge
 from message_filters import Subscriber, ApproximateTimeSynchronizer
 import cv2
@@ -11,38 +10,7 @@ import os
 import numpy as np
 from math import sqrt
 
-def get_euler_from_quaternion(qx, qy, qz, qw):
-    """
-    Convert a quaternion to an Euler angle.
-     
-    Input
-        :param qx, qy, qz, qw: The orientation in quaternion [x,y,z,w] format
-     
-    Output
-        :return roll, pitch, yaw: The roll, pitch, and yaw angles in radians
-    """
-    roll = np.arctan2(2 * (qw * qx + qy * qz), 1 - 2 * (qx**2 + qy**2))
-    pitch = np.arcsin(2 * (qw * qy - qz * qx))
-    yaw = np.arctan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy**2 + qz**2))
-     
-    return roll, pitch, yaw
-
-def get_rotation_matrix_from_quaternion(qx, qy, qz, qw):
-    """
-    Convert a quaternion to a rotation matrix.
-     
-    Input
-        :param qx, qy, qz, qw: The orientation in quaternion [x,y,z,w] format
-     
-    Output
-        :return R: The rotation matrix
-    """
-    R = np.array([
-        [1 - 2 * (qy**2 + qz**2), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)],
-        [2 * (qx * qy + qz * qw), 1 - 2 * (qx**2 + qz**2), 2 * (qy * qz - qx * qw)],
-        [2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx**2 + qy**2)]
-    ])
-    return R
+import perception.util.ground_truth as GroundTruth
  
 class CarLocalizer(Node):
   """
@@ -182,58 +150,6 @@ class CarLocalizer(Node):
     
     # Only need the camera parameters once (assuming no change)
     self.destroy_subscription(self.color_camera_info_sub)
-  
-  def get_camera_frame_id(self):
-    """
-    Get the frame ID of the camera in order to locate the transform in the TF tree
-    """
-    return f'{self.agent_name}/base_link/{self.agent_name}_{self.camera_name}_{self.SELECTED_CAMERA}'
-  
-  def get_aruco_frame_id(self):
-    """
-    Get the frame ID of the ArUco marker in order to locate the transform in the TF tree
-    """
-    return f'{self.opponent_name}/aruco_link'
-  
-  def get_camera_world_pose(self, data: TFMessage) -> tuple[np.ndarray, TransformStamped.header]:
-    """
-    Get the world pose of the camera from the agent vehicle's published transforms
-    """
-    agent_model_pos = [tf for tf in data.transforms if tf.child_frame_id == self.agent_name]
-    camera_pos = [tf for tf in data.transforms if tf.child_frame_id == self.get_camera_frame_id()]
-
-    if len(agent_model_pos) > 0 and len(camera_pos) > 0:
-      agent_trans, agent_rot = agent_model_pos[0].transform.translation, agent_model_pos[0].transform.rotation
-      camera_trans, camera_rot = camera_pos[0].transform.translation, camera_pos[0].transform.rotation
-
-      camera_T = np.array([camera_trans.x, camera_trans.y, camera_trans.z])
-      agent_T = np.array([agent_trans.x, agent_trans.y, agent_trans.z])
-      R = get_rotation_matrix_from_quaternion(agent_rot.x, agent_rot.y, agent_rot.z, agent_rot.w)
-
-      camera_world_pose = R @ camera_T + agent_T
-      return camera_world_pose, camera_pos[0].header
-    else:
-      return None, None
-  
-  def get_aruco_world_pose(self, data: TFMessage) -> tuple[np.ndarray, TransformStamped.header]:
-    """
-    Get the world pose of the ArUco marker from the opponent vehicle's published transforms
-    """
-    opponent_model_pos = [tf for tf in data.transforms if tf.child_frame_id == self.opponent_name]
-    opponent_aruco_pos = [tf for tf in data.transforms if tf.child_frame_id == self.get_aruco_frame_id()]
-    
-    if len(opponent_model_pos) > 0 and len(opponent_aruco_pos) > 0:
-      opp_trans, opp_rot = opponent_model_pos[0].transform.translation, opponent_model_pos[0].transform.rotation
-      aruco_trans, aruco_rot = opponent_aruco_pos[0].transform.translation, opponent_aruco_pos[0].transform.rotation
-
-      aruco_T = np.array([aruco_trans.x, aruco_trans.y, aruco_trans.z])
-      opp_T = np.array([opp_trans.x, opp_trans.y, opp_trans.z])
-      R = get_rotation_matrix_from_quaternion(opp_rot.x, opp_rot.y, opp_rot.z, opp_rot.w)
-
-      aruco_world_pose = R @ aruco_T + opp_T
-      return aruco_world_pose, opponent_aruco_pos[0].header
-    else:
-      return None, None
     
   def agent_pose_callback(self, data: TFMessage):
     """
@@ -241,7 +157,7 @@ class CarLocalizer(Node):
 
     This publishes the 3D world position (x,y,z) of the camera on the agent vehicle
     """
-    camera_world_pose, header = self.get_camera_world_pose(data)
+    camera_world_pose, header = GroundTruth.get_camera_world_pose(data, self.agent_name, self.camera_name, self.SELECTED_CAMERA)
     if camera_world_pose is not None:
       msg = Vector3Stamped()
       msg.header = header
@@ -255,7 +171,7 @@ class CarLocalizer(Node):
 
     This publishes the 3D world position (x,y,z) of the ArUco marker on the opponent vehicle
     """
-    aruco_world_pose, header = self.get_aruco_world_pose(data)
+    aruco_world_pose, header = GroundTruth.get_aruco_world_pose(data, self.opponent_name)
     if aruco_world_pose is not None and header is not None:
       msg = Vector3Stamped()
       msg.header = header

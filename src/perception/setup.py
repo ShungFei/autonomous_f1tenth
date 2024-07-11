@@ -24,6 +24,7 @@ setup(
     entry_points={
         'console_scripts': [
             'localize = perception.localize:main',
+            'stereo_localize = perception.stereo_localize:main',
         ],
     },
 )

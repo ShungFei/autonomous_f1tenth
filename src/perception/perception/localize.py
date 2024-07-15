@@ -37,13 +37,14 @@ class CarLocalizer(Node):
     self.debug = self.declare_parameter('debug', False).get_parameter_value().bool_value
 
     self.get_logger().info(f"Subscribing to {self.agent_name}")
-
-    self.color_image_sub = self.create_subscription(
-      Image, 
-      f'{self.agent_name}/{self.camera_name}/{self.SELECTED_CAMERA}/image_raw', 
-      self.image_callback, 
-      10)
     
+    if self.debug == True:
+      self.color_image_sub = self.create_subscription(
+        Image, 
+        f'{self.agent_name}/{self.camera_name}/{self.SELECTED_CAMERA}/image_raw', 
+        self.image_callback, 
+        10)
+      
     self.color_camera_info_sub = self.create_subscription(
       CameraInfo, 
       f'{self.agent_name}/{self.camera_name}/{self.SELECTED_CAMERA}/camera_info', 
@@ -112,7 +113,7 @@ class CarLocalizer(Node):
     self.aruco_dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_250)
 
     # Define the side length of the ArUco marker
-    side_length = 0.15 # 75/720
+    side_length = 0.15
 
     # Define the half side length
     half_side_length = side_length / 2
@@ -136,13 +137,14 @@ class CarLocalizer(Node):
     aruco_pose = np.array([aruco_pose.vector.x, aruco_pose.vector.y, aruco_pose.vector.z])
     camera_pose = np.array([camera_pose.vector.x, camera_pose.vector.y, camera_pose.vector.z])
 
-    if aruco_pose is not None and camera_pose is not None and detected_aruco_pose is not None:
+    if aruco_pose is not None and camera_pose is not None and detected_aruco_pose is not None and self.debug == True:
       print('intrinsics', self.color_intrinsics)
       print('aruco', aruco_pose)
       print('camera', camera_pose)
       print('detected', detected_aruco_pose)
-      print('distance', sqrt(np.sum((aruco_pose - camera_pose)**2)))
-      print('distance', sqrt(np.sum((detected_aruco_pose)**2)))
+
+    print('ground truth distance:', sqrt(np.sum((aruco_pose - camera_pose)**2)))
+    print('estimated distance:', sqrt(np.sum((detected_aruco_pose)**2)))
 
   def camera_info_callback(self, data: CameraInfo):
     self.color_intrinsics = data.k.reshape(3, 3)
@@ -193,12 +195,13 @@ class CarLocalizer(Node):
       dictionary = self.aruco_dictionary)
     if len(marker_corners) > 0:
       # tvec contains position of marker in camera frame
-      
       _, rvec, tvec = cv2.solvePnP(self.marker_obj_points, marker_corners[0], 
                          self.color_intrinsics, 0, flags=cv2.SOLVEPNP_SQPNP)
-      print('corners', marker_corners[0])
-      print('rvec', rvec)
-      print('tvec', tvec)
+      
+      if self.debug == True:
+        print('corners', marker_corners[0])
+        print('rvec', rvec)
+        print('tvec', tvec)
       return tvec
     else:
       return None

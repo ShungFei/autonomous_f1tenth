@@ -82,7 +82,8 @@ def monocular_nodes(name, camera_name, opponent_name):
             parameters=[{
                 'agent_name': name,
                 'camera_name': camera_name,
-                'opponent_name': opponent_name
+                'opponent_name': opponent_name,
+                'debug': True
             }],
             emulate_tty=True
         ),
@@ -135,10 +136,18 @@ def spawn_func(context, *args, **kwargs):
         *spawn_model_from_xacro(xacro_file, name, x, y, z, R, P, Y, add_camera="true", camera_name="d435", use_stereo=is_stereo),
         *spawn_model_from_xacro(xacro_file, opponent_name, 0, 0, 0, 0, 0, 0, add_aruco="true"),
         Node(
+            package='perception',
+            executable='trajectory',
+            name='trajectory',
+            output='screen',
+            emulate_tty=True
+        ),
+        Node(
             package='ros_gz_bridge',
             executable='parameter_bridge',
             arguments=[
                 f'/model/{name}/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist',
+                f'/model/{opponent_name}/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist',
                 f'/{name}/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan',
                 f'/{name}/{camera_name}/color/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
                 f'/{name}/{stereo_camera_name}/left/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
@@ -151,6 +160,7 @@ def spawn_func(context, *args, **kwargs):
             ],
             remappings=[
                 (f'/model/{name}/cmd_vel', f'/{name}/cmd_vel'),
+                (f'/model/{opponent_name}/cmd_vel', f'/{opponent_name}/cmd_vel'),
                 (f'/model/{name}/pose', f'/{name}/pose'),
                 (f'/model/{opponent_name}/pose', f'/{opponent_name}/pose'),
                 (f'/model/{name}/odometry', f'/{name}/odometry'),

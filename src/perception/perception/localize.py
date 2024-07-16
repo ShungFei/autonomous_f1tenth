@@ -2,7 +2,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CameraInfo 
 from tf2_msgs.msg import TFMessage
-from geometry_msgs.msg import Vector3Stamped
+from geometry_msgs.msg import Vector3Stamped, PoseStamped
 from cv_bridge import CvBridge
 from message_filters import Subscriber, ApproximateTimeSynchronizer
 import cv2
@@ -11,6 +11,7 @@ import numpy as np
 from math import sqrt
 
 import perception.util.ground_truth as GroundTruth
+from perception.util.conversion import get_time_from_header, get_quaternion_from_rotation_matrix
  
 class CarLocalizer(Node):
   """
@@ -33,11 +34,13 @@ class CarLocalizer(Node):
 
     self.agent_name = self.declare_parameter('agent_name', "f1tenth").get_parameter_value().string_value
     self.camera_name = self.declare_parameter('camera_name', "d435").get_parameter_value().string_value
+    
+    # Currently unused
     self.opponent_name = self.declare_parameter('opponent_name', "opponent").get_parameter_value().string_value
     self.debug = self.declare_parameter('debug', False).get_parameter_value().bool_value
 
     self.get_logger().info(f"Subscribing to {self.agent_name}")
-    
+
     if self.debug == True:
       self.color_image_sub = self.create_subscription(
         Image, 
@@ -52,28 +55,9 @@ class CarLocalizer(Node):
       10
     )
 
-    self.camera_pose_pub = self.create_publisher(
-      Vector3Stamped,
-      f'{self.agent_name}/camera_pose',
-      10
-    )
-    self.aruco_pose_pub = self.create_publisher(
-      Vector3Stamped,
-      f'{self.opponent_name}/aruco_pose',
-      10
-    )
-
-    self.agent_pose_sub = self.create_subscription(
-      TFMessage,
-      f'{self.agent_name}/pose', 
-      self.agent_pose_callback, 
-      10
-    )
-
-    self.opponent_pose_sub = self.create_subscription(
-      TFMessage,
-      f'{self.opponent_name}/pose',
-      self.opponent_pose_callback,
+    self.opp_estimated_pose_pub = self.create_publisher(
+      PoseStamped,
+      f'{self.opponent_name}/pose_estimate',
       10
     )
 
@@ -89,24 +73,12 @@ class CarLocalizer(Node):
       f'{self.agent_name}/{self.camera_name}/{self.SELECTED_DEPTH_CAMERA}/image_rect_raw',
     )
 
-    self.camera_pose_sub = Subscriber(
-      self,
-      Vector3Stamped,
-      f'{self.agent_name}/camera_pose',
-    )
-
-    self.aruco_pose_sub = Subscriber(
-      self,
-      Vector3Stamped,
-      f'{self.opponent_name}/aruco_pose',
-    )
-
     self.eval_sub = ApproximateTimeSynchronizer(
-        [self.color_image_sub, self.depth_image_sub, self.camera_pose_sub, self.aruco_pose_sub],
+        [self.color_image_sub, self.depth_image_sub],
         10,
         0.1,
     )
-    self.eval_sub.registerCallback(self.eval_callback)
+    self.eval_sub.registerCallback(self.pose_pub_callback)
 
     self.color_intrinsics = None
     self.dist_coeffs = None
@@ -129,22 +101,32 @@ class CarLocalizer(Node):
     # Used to convert between ROS and OpenCV images
     self.bridge = CvBridge()
 
-  def eval_callback(self, image: Image, depth_image: Image, camera_pose: Vector3Stamped, aruco_pose: Vector3Stamped):
+  def pose_pub_callback(self, image: Image, depth_image: Image):
     """
-    Synced callback function for the camera image, depth image, camera pose, and ArUco pose for evaluation
+    Publish the estimated pose of the opponent
     """
-    detected_aruco_pose = self.locate_aruco(image)
-    aruco_pose = np.array([aruco_pose.vector.x, aruco_pose.vector.y, aruco_pose.vector.z])
-    camera_pose = np.array([camera_pose.vector.x, camera_pose.vector.y, camera_pose.vector.z])
+    rvec, tvec = self.locate_aruco(image)
 
-    if aruco_pose is not None and camera_pose is not None and detected_aruco_pose is not None and self.debug == True:
-      print('intrinsics', self.color_intrinsics)
-      print('aruco', aruco_pose)
-      print('camera', camera_pose)
-      print('detected', detected_aruco_pose)
+    if rvec is not None and tvec is not None:
+      if self.debug == True:
+        print('intrinsics', self.color_intrinsics)
+        print('detected', tvec)
 
-    print('ground truth distance:', sqrt(np.sum((aruco_pose - camera_pose)**2)))
-    print('estimated distance:', sqrt(np.sum((detected_aruco_pose)**2)))
+        # convert ros header time to seconds
+        print('time:', get_time_from_header(image.header))
+        print('estimated distance:', sqrt(np.sum((tvec)**2)))
+
+      rot_matrix, _ = cv2.Rodrigues(rvec)
+      quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
+
+      # Publish the estimated pose
+      msg = PoseStamped()
+
+      msg.header = image.header
+      msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = tvec[0][0], tvec[1][0], tvec[2][0]
+      msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w = quaternion
+
+      self.opp_estimated_pose_pub.publish(msg)
 
   def camera_info_callback(self, data: CameraInfo):
     self.color_intrinsics = data.k.reshape(3, 3)
@@ -152,34 +134,6 @@ class CarLocalizer(Node):
     
     # Only need the camera parameters once (assuming no change)
     self.destroy_subscription(self.color_camera_info_sub)
-    
-  def agent_pose_callback(self, data: TFMessage):
-    """
-    Callback function for the agent's pose
-
-    This publishes the 3D world position (x,y,z) of the camera on the agent vehicle
-    """
-    camera_world_pose, header = GroundTruth.get_camera_world_pose(data, self.agent_name, self.camera_name, self.SELECTED_CAMERA)
-    if camera_world_pose is not None:
-      msg = Vector3Stamped()
-      msg.header = header
-      msg.vector.x, msg.vector.y, msg.vector.z = camera_world_pose
-
-      self.camera_pose_pub.publish(msg)
-  
-  def opponent_pose_callback(self, data: TFMessage):
-    """
-    Callback function for the opponent's pose
-
-    This publishes the 3D world position (x,y,z) of the ArUco marker on the opponent vehicle
-    """
-    aruco_world_pose, header = GroundTruth.get_aruco_world_pose(data, self.opponent_name)
-    if aruco_world_pose is not None and header is not None:
-      msg = Vector3Stamped()
-      msg.header = header
-      msg.vector.x, msg.vector.y, msg.vector.z = aruco_world_pose
-
-      self.aruco_pose_pub.publish(msg)
   
   def locate_aruco(self, image: Image):
     current_frame = self.bridge.imgmsg_to_cv2(image)
@@ -202,9 +156,9 @@ class CarLocalizer(Node):
         print('corners', marker_corners[0])
         print('rvec', rvec)
         print('tvec', tvec)
-      return tvec
+      return rvec, tvec
     else:
-      return None
+      return None, None
 
   def image_callback(self, data: Image):
     """

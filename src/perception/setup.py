@@ -26,6 +26,7 @@ setup(
             'localize = perception.localize:main',
             'stereo_localize = perception.stereo_localize:main',
             'trajectory = perception.trajectory:main',
+            'evaluation = perception.evaluation:main',
         ],
     },
 )

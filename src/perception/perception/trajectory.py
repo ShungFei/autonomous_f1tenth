@@ -125,7 +125,10 @@ class Trajectory(Node):
     if self.start_agent_vel_pub and self.start_opp_vel_pub and self.start_agent_vel_time is not None and self.start_opp_vel_time is not None:
       time = get_time_from_clock(data)
 
-      if self.agent_checkpoint >= len(self.vels["agent"]) and self.opp_checkpoint >= len(self.vels["opponent"]):
+      # Stop the vehicles after the evaluation time has passed
+      if time >= self.eval_time:
+        self.agent_vel_publisher.publish(self.create_velocity_msg(0.0, 0.0))
+        self.opp_vel_publisher.publish(self.create_velocity_msg(0.0, 0.0))
         self.destroy_subscription(self.clock_sub)
         return
     
@@ -141,12 +144,7 @@ class Trajectory(Node):
           self.opp_checkpoint += 1
           self.opp_vel_publisher.publish(self.create_velocity_msg(next_opp_timestep["linear"], next_opp_timestep["angular"]))
       
-      # Stop the vehicles after the evaluation time has passed
-      if time >= self.eval_time:
-        self.agent_vel_publisher.publish(self.create_velocity_msg(0.0, 0.0))
-        self.opp_vel_publisher.publish(self.create_velocity_msg(0.0, 0.0))
-        self.destroy_subscription(self.clock_sub)
-        return
+      print(time, self.eval_time)
 
   def create_velocity_msg(self, linear, angular):
     """

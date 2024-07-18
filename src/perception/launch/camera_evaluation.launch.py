@@ -3,16 +3,21 @@ import os
 from ament_index_python import get_package_share_directory
 from launch import LaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, EnvironmentVariable
 from launch.actions import (
     ExecuteProcess,
+    RegisterEventHandler,
     DeclareLaunchArgument,
     OpaqueFunction,
     IncludeLaunchDescription,
     SetEnvironmentVariable,
     Shutdown,
+    LogInfo,
+    EmitEvent,
     TimerAction,
 )
+from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
 from launch_ros.descriptions import ParameterValue
 from launch_ros.actions import Node
 from launch.conditions import IfCondition
@@ -51,7 +56,7 @@ def spawn_model_from_xacro(xacro_file, name, x, y, z, R, P, Y, **kwargs):
         output='screen'
     )
 
-def stereo_nodes(name, camera_name, opponent_name):
+def stereo_nodes(name, camera_name, opponent_name, debug=False):
     return [
         Node(
             package="perception",
@@ -63,6 +68,7 @@ def stereo_nodes(name, camera_name, opponent_name):
                     "agent_name": name,
                     "camera_name": camera_name,
                     "opponent_name": opponent_name,
+                    "debug": debug,
                 }
             ],
             emulate_tty=True,
@@ -98,22 +104,7 @@ def monocular_nodes(name, camera_name, opponent_name, eval_time, debug=False):
             ],
             emulate_tty=True,
         ),
-        Node(
-            package="perception",
-            executable="evaluation",
-            name="evaluation",
-            output="screen",
-            parameters=[
-                {
-                    "agent_name": name,
-                    "camera_name": camera_name,
-                    "opponent_name": opponent_name,
-                    "eval_time": eval_time,
-                    "debug": debug,
-                }
-            ],
-            emulate_tty=True,
-        ),
+        
         Node(
             package="ros_gz_image",
             executable="image_bridge",
@@ -144,6 +135,7 @@ def spawn_func(context, *args, **kwargs):
         ),
         launch_arguments={
             "gz_args": f"-r {pkg_environments}/worlds/evaluation.sdf",
+            'on_exit_shutdown': 'true'
         }.items(),
     )
 
@@ -152,7 +144,7 @@ def spawn_func(context, *args, **kwargs):
     camera_name = LaunchConfiguration("camera_name").perform(context)
     stereo_camera_name = LaunchConfiguration("stereo_camera_name").perform(context)
     opponent_name = LaunchConfiguration("opponent_name").perform(context)
-    is_stereo = LaunchConfiguration("stereo").perform(context)
+    is_stereo = LaunchConfiguration("stereo").perform(context).lower()
 
     debug = LaunchConfiguration("debug").perform(context).lower() == "true"
     eval_time = float(LaunchConfiguration("eval_time").perform(context))
@@ -164,6 +156,24 @@ def spawn_func(context, *args, **kwargs):
     R = LaunchConfiguration("R").perform(context)
     P = LaunchConfiguration("P").perform(context)
     Y = LaunchConfiguration("Y").perform(context)
+
+    evaluation_node = Node(
+        package="perception",
+        executable="evaluation",
+        name="evaluation",
+        output="screen",
+        parameters=[
+            {
+                "agent_name": name,
+                "camera_name": camera_name if is_stereo == "false" else stereo_camera_name,
+                "opponent_name": opponent_name,
+                "eval_time": eval_time,
+                "is_stereo": is_stereo == "true",
+                "debug": debug,
+            }
+        ],
+        emulate_tty=True,
+    )
 
     return [
         gz_sim,
@@ -191,8 +201,9 @@ def spawn_func(context, *args, **kwargs):
             parameters=[
                 {
                     "agent_name": name,
-                    "camera_name": camera_name,
+                    "camera_name": camera_name if is_stereo == "false" else stereo_camera_name,
                     "opponent_name": opponent_name,
+                    "is_stereo": is_stereo == "true",
                     "eval_time": eval_time,
                 }
             ],
@@ -228,7 +239,19 @@ def spawn_func(context, *args, **kwargs):
                 (f"/world/{world}/model/{name}/joint_state", f"/{name}/joint_states"),
             ],
         ),
-        *(monocular_nodes(name, camera_name, opponent_name, eval_time, debug=debug) if is_stereo == "false" else stereo_nodes(name, stereo_camera_name, opponent_name)),
+        evaluation_node,
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=evaluation_node,
+                on_exit=[
+                    LogInfo(msg=(EnvironmentVariable(name='USER'),
+                            ' destroyed the evaluation node')),
+                    EmitEvent(event=Shutdown(
+                        reason='Evaluation compelte'))
+                ]
+            )
+        ),
+        *(monocular_nodes(name, camera_name, opponent_name, eval_time, debug=debug) if is_stereo == "false" else stereo_nodes(name, stereo_camera_name, opponent_name, debug=debug)),
     ]
 
 
@@ -309,7 +332,7 @@ def generate_launch_description():
             z,
             R,
             P,
-            Y,
+            Y,            
             OpaqueFunction(function=spawn_func),
         ]
     )

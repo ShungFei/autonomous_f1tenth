@@ -39,9 +39,13 @@ class Trajectory(Node):
     # Name of the cameras to use
     self.SELECTED_CAMERA = "color"
 
+    self.SELECTED_LEFT_CAMERA = "left"
+    self.SELECTED_RIGHT_CAMERA = "right"
+
     self.agent_name = self.declare_parameter('agent_name', "f1tenth").get_parameter_value().string_value
     self.camera_name = self.declare_parameter('camera_name', "d435").get_parameter_value().string_value
     self.opponent_name = self.declare_parameter('opponent_name', "opponent").get_parameter_value().string_value 
+    self.is_stereo = self.declare_parameter('is_stereo', False).get_parameter_value().bool_value
     self.eval_time = self.declare_parameter('eval_time', 10.0).get_parameter_value().double_value
 
     self.start_agent_vel_pub = False
@@ -90,14 +94,15 @@ class Trajectory(Node):
       10
     )
 
-
   def agent_pose_callback(self, data: TFMessage):
     """
     Callback function for the agent's pose
 
     Determines if the agent has settled before publishing velocity commands
     """
-    camera_world_pose, header = GroundTruth.get_camera_world_pose(data, self.agent_name, self.camera_name, self.SELECTED_CAMERA)
+    camera_world_pose, header = GroundTruth.get_camera_world_pose(
+      data, self.agent_name, self.camera_name,
+      self.SELECTED_CAMERA if not self.is_stereo else self.SELECTED_LEFT_CAMERA)
 
     self.prev_camera_pose = self.camera_pose
     self.camera_pose = camera_world_pose
@@ -144,8 +149,6 @@ class Trajectory(Node):
           self.opp_checkpoint += 1
           self.opp_vel_publisher.publish(self.create_velocity_msg(next_opp_timestep["linear"], next_opp_timestep["angular"]))
       
-      print(time, self.eval_time)
-
   def create_velocity_msg(self, linear, angular):
     """
     Create a Twist message with the given linear and angular velocities

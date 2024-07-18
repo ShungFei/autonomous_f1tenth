@@ -8,6 +8,7 @@ from message_filters import Subscriber, ApproximateTimeSynchronizer
 import cv2
 import os
 import numpy as np
+import pandas as pd
 from math import sqrt
 import seaborn as sns
 from matplotlib import pyplot as plt
@@ -16,7 +17,8 @@ from datetime import datetime
 
 import perception.util.ground_truth as GroundTruth
 from perception.util.conversion import get_time_from_header, get_quaternion_from_rotation_matrix
- 
+from perception_interfaces.msg import OptionalPoseStamped
+
 class Evaluation(Node):
   def __init__(self):
     """
@@ -32,6 +34,9 @@ class Evaluation(Node):
     # Name of the cameras to use
     self.SELECTED_CAMERA = "color"
     self.SELECTED_DEPTH_CAMERA = "depth"
+
+    self.SELECTED_LEFT_CAMERA = "left"
+    self.SELECTED_RIGHT_CAMERA = "right"
     
     plt.style.use("seaborn-v0_8")
 
@@ -39,6 +44,7 @@ class Evaluation(Node):
     self.camera_name = self.declare_parameter('camera_name', "d435").get_parameter_value().string_value
     self.opponent_name = self.declare_parameter('opponent_name', "opponent").get_parameter_value().string_value
     self.debug = self.declare_parameter('debug', False).get_parameter_value().bool_value
+    self.is_stereo = self.declare_parameter('is_stereo', False).get_parameter_value().bool_value
     self.eval_time = self.declare_parameter('eval_time', 10.0).get_parameter_value().double_value
 
     self.get_logger().info(f"Subscribing to {self.agent_name}")
@@ -71,7 +77,7 @@ class Evaluation(Node):
 
     self.opp_estimated_pose_sub = Subscriber(
       self,
-      PoseStamped,
+      OptionalPoseStamped,
       f'{self.opponent_name}/pose_estimate',
     )
 
@@ -101,14 +107,14 @@ class Evaluation(Node):
     # Used to convert between ROS and OpenCV images
     self.bridge = CvBridge()
 
-  def eval_callback(self, estimated_pose: PoseStamped, camera_pose: Vector3Stamped, aruco_pose: Vector3Stamped):
+  def eval_callback(self, estimated_pose: OptionalPoseStamped, camera_pose: Vector3Stamped, aruco_pose: Vector3Stamped):
     """
     Synced callback function for the camera image, depth image, camera pose, and ArUco pose for evaluation
     """
     aruco_pose = np.array([aruco_pose.vector.x, aruco_pose.vector.y, aruco_pose.vector.z])
     camera_pose = np.array([camera_pose.vector.x, camera_pose.vector.y, camera_pose.vector.z])
-    curr_sim_time = get_time_from_header(estimated_pose.header)
-
+    curr_clock_time = get_time_from_header(estimated_pose.header)
+    print('time', curr_clock_time)
     if aruco_pose is not None and camera_pose is not None and estimated_pose is not None:
       if self.debug == True:
         print('aruco', aruco_pose)
@@ -118,15 +124,18 @@ class Evaluation(Node):
       estimated_tvec = np.array([estimated_pose.pose.position.x, estimated_pose.pose.position.y, estimated_pose.pose.position.z])
 
       # Append the data to the lists
-      self.time_list.append(curr_sim_time)
+      self.time_list.append(curr_clock_time)
       self.ground_truth_list.append(sqrt(np.sum((aruco_pose - camera_pose)**2)))
-      self.estimated_distance_list.append(sqrt(np.sum((estimated_tvec)**2)))
 
-      print('time', curr_sim_time)
-      print('ground truth distance:', sqrt(np.sum((aruco_pose - camera_pose)**2)))
-      print('estimated distance:', sqrt(np.sum((estimated_tvec)**2)))
+      if estimated_pose.is_set:
+        self.estimated_distance_list.append(sqrt(np.sum((estimated_tvec)**2)))
+      else:
+        self.estimated_distance_list.append(np.nan)
 
-    if curr_sim_time >= self.eval_time:
+      # print('time', curr_clock_time)
+      # print('ground truth distance:', sqrt(np.sum((aruco_pose - camera_pose)**2)))
+      # print('estimated distance:', sqrt(np.sum((estimated_tvec)**2)))
+    if curr_clock_time >= self.eval_time:
       curr_time = datetime.now().strftime('%y_%m_%d_%H:%M:%S')
 
       # Create a directory to save the evaluation data
@@ -136,7 +145,8 @@ class Evaluation(Node):
       self.write_eval_data(self.time_list, self.ground_truth_list, self.estimated_distance_list, curr_time)
 
       self.plot_distance(self.time_list, self.ground_truth_list, self.estimated_distance_list, curr_time)
-      self.plot_diff(self.time_list, self.ground_truth_list, self.estimated_distance_list, curr_time)
+      self.plot_time_diff(self.time_list, self.ground_truth_list, self.estimated_distance_list, curr_time)
+      self.plot_dist_diff(self.ground_truth_list, self.estimated_distance_list, curr_time)
 
       # Destroy all relevant subscriptions
       self.destroy_subscription(self.opp_estimated_pose_sub.sub)
@@ -163,32 +173,56 @@ class Evaluation(Node):
 
     return time_list, ground_truth_list, estimated_distance_list
   
-  def plot_diff(self, time_list, ground_truth_list, estimated_distance_list, curr_time):
+  def plot_time_diff(self, time_list, ground_truth_list, estimated_distance_list, curr_time):
     """
     Plot the difference between the ground truth and estimated distance
     """
     plt.clf()
-    sns.lineplot(x=time_list, y=np.array(ground_truth_list) - np.array(estimated_distance_list))
+    sns.pointplot(x=time_list, y=np.array(ground_truth_list) - np.array(estimated_distance_list),
+                  color='blue', native_scale=True, label='Distance Error',
+                  ms=3, linewidth=1, marker='.')
 
     # Add labels and title to the plot
-    plt.xlabel('Time')
-    plt.ylabel('Difference')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Difference (m)')
     plt.title('Difference between Ground Truth and Estimated Distance')
 
     # Save the plot as an image
-    plt.savefig(f'{self.FIGURES_DIR}/{curr_time}/diff_plot.png')
+    plt.savefig(f'{self.FIGURES_DIR}/{curr_time}/time_diff_plot.png')
+  
+  def plot_dist_diff(self, ground_truth_list, estimated_distance_list, curr_time):
+    """
+    Plot the difference between the ground truth and estimated distance with respect to ground truth
+    """
+    plt.clf()
+    sns.pointplot(x=ground_truth_list, y=np.array(ground_truth_list) - np.array(estimated_distance_list),
+                  color='blue', native_scale=True, label='Distance Error',
+                  ms=3, linewidth=1, marker='.')
+
+    # Add labels and title to the plot
+    plt.xlabel('Ground truth distance (m)')
+    plt.ylabel('Difference (m)')
+    plt.title('Difference between Ground Truth and Estimated Distance')
+
+    # Save the plot as an image
+    plt.savefig(f'{self.FIGURES_DIR}/{curr_time}/dist_diff_plot.png')
 
   def plot_distance(self, time_list, ground_truth_list, estimated_distance_list, curr_time):
     """
     Plot the ground truth and estimated distance
     """
     plt.clf()
-    sns.lineplot(x=time_list, y=ground_truth_list, label='Ground Truth')
-    sns.lineplot(x=time_list, y=estimated_distance_list, label='Estimated Distance')
+
+    sns.pointplot(x=time_list, y=estimated_distance_list, color='blue',
+                  native_scale=True, label='Estimated Distance', ms=3,
+                  linewidth=1, marker='x')
+    sns.pointplot(x=time_list, y=ground_truth_list, color='green',
+                  native_scale=True, label='Ground Truth', ms=3,
+                  linewidth=1, marker='.')
 
     # Add labels and title to the plot
-    plt.xlabel('Time')
-    plt.ylabel('Distance')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Distance (m)')
     plt.title('Ground Truth vs Estimated Distance')
 
     # Save the plot as an image
@@ -200,7 +234,10 @@ class Evaluation(Node):
 
     This publishes the 3D world position (x,y,z) of the camera on the agent vehicle
     """
-    camera_world_pose, header = GroundTruth.get_camera_world_pose(data, self.agent_name, self.camera_name, self.SELECTED_CAMERA)
+    camera_world_pose, header = GroundTruth.get_camera_world_pose(
+      data, self.agent_name, self.camera_name, 
+      self.SELECTED_CAMERA if not self.is_stereo else self.SELECTED_LEFT_CAMERA)
+    
     if camera_world_pose is not None:
       msg = Vector3Stamped()
       msg.header = header
@@ -227,7 +264,8 @@ def main(args=None):
 
   evaluation = Evaluation()
 
-  rclpy.spin(evaluation)
-
-  evaluation.destroy_node()
-  rclpy.shutdown()
+  try:
+    rclpy.spin(evaluation)
+  finally:
+    evaluation.destroy_node()
+    rclpy.shutdown()

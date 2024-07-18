@@ -12,7 +12,8 @@ from math import sqrt
 
 import perception.util.ground_truth as GroundTruth
 from perception.util.conversion import get_time_from_header, get_quaternion_from_rotation_matrix
- 
+from perception_interfaces.msg import OptionalPoseStamped
+
 class CarLocalizer(Node):
   """
   Create an ImageSubscriber class, which is a subclass of the Node class.
@@ -56,7 +57,7 @@ class CarLocalizer(Node):
     )
 
     self.opp_estimated_pose_pub = self.create_publisher(
-      PoseStamped,
+      OptionalPoseStamped,
       f'{self.opponent_name}/pose_estimate',
       10
     )
@@ -108,25 +109,21 @@ class CarLocalizer(Node):
     rvec, tvec = self.locate_aruco(image)
 
     if rvec is not None and tvec is not None:
-      if self.debug == True:
-        print('intrinsics', self.color_intrinsics)
-        print('detected', tvec)
-
-        # convert ros header time to seconds
-        print('time:', get_time_from_header(image.header))
-        print('estimated distance:', sqrt(np.sum((tvec)**2)))
-
       rot_matrix, _ = cv2.Rodrigues(rvec)
       quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
 
       # Publish the estimated pose
-      msg = PoseStamped()
+      msg = OptionalPoseStamped()
 
+      msg.is_set = True
       msg.header = image.header
       msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = tvec[0][0], tvec[1][0], tvec[2][0]
       msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w = quaternion
 
       self.opp_estimated_pose_pub.publish(msg)
+    else:
+      self.opp_estimated_pose_pub.publish(OptionalPoseStamped(
+        header=image.header, is_set=False))
 
   def camera_info_callback(self, data: CameraInfo):
     self.color_intrinsics = data.k.reshape(3, 3)

@@ -17,7 +17,7 @@ from datetime import datetime
 
 import perception.util.ground_truth as GroundTruth
 from perception.util.conversion import get_time_from_header, get_quaternion_from_rotation_matrix
-from perception_interfaces.msg import OptionalPoseStamped
+from perception_interfaces.msg import OptionalPoseStamped, StateEstimateStamped
 
 class Evaluation(Node):
   def __init__(self):
@@ -93,8 +93,14 @@ class Evaluation(Node):
       f'{self.opponent_name}/aruco_pose',
     )
 
+    self.state_estimate_sub = Subscriber(
+      self,
+      StateEstimateStamped,
+      f'{self.opponent_name}/state_estimate',
+    )
+
     self.eval_sub = ApproximateTimeSynchronizer(
-        [self.opp_estimated_pose_sub, self.camera_pose_sub, self.aruco_pose_sub],
+        [self.opp_estimated_pose_sub, self.camera_pose_sub, self.aruco_pose_sub, self.state_estimate_sub],
         10,
         0.1,
     )
@@ -103,11 +109,13 @@ class Evaluation(Node):
     self.time_list = []
     self.ground_truth_list = []
     self.estimated_distance_list = []
+    self.state_list = []
+    self.ground_truth_state_list = []
 
     # Used to convert between ROS and OpenCV images
     self.bridge = CvBridge()
 
-  def eval_callback(self, estimated_pose: OptionalPoseStamped, camera_pose: Vector3Stamped, aruco_pose: Vector3Stamped):
+  def eval_callback(self, estimated_pose: OptionalPoseStamped, camera_pose: Vector3Stamped, aruco_pose: Vector3Stamped, state_estimate: StateEstimateStamped):
     """
     Synced callback function for the camera image, depth image, camera pose, and ArUco pose for evaluation
     """
@@ -132,8 +140,10 @@ class Evaluation(Node):
 
       if estimated_pose.is_set:
         self.estimated_distance_list.append(sqrt(np.sum((estimated_tvec)**2)))
+        self.state_list.append(state_estimate)
       else:
         self.estimated_distance_list.append(np.nan)
+        self.state_list.append(np.nan)
 
       # print('time', curr_clock_time)
       # print('ground truth distance:', sqrt(np.sum((aruco_pose - camera_pose)**2)))
@@ -145,23 +155,30 @@ class Evaluation(Node):
       os.makedirs(f'{self.FIGURES_DIR}/{curr_time}', exist_ok=True)
 
       # Save the data to a file
-      self.write_eval_data(self.time_list, self.ground_truth_list, self.estimated_distance_list, curr_time)
+      self.write_eval_data(self.time_list, self.ground_truth_list, self.estimated_distance_list, self.state_list, curr_time)
 
       self.plot_distance(self.time_list, self.ground_truth_list, self.estimated_distance_list, curr_time)
-      self.plot_time_diff(self.time_list, self.ground_truth_list, self.estimated_distance_list, curr_time)
+      self.plot_time_diff(self.time_list, self.ground_truth_list, self.estimated_distance_list, self.state_list, curr_time)
       self.plot_dist_diff(self.ground_truth_list, self.estimated_distance_list, curr_time)
+      self.plot_state(self.ground_truth_list, self.estimated_distance_list, self.state_list, curr_time)
 
       # Destroy all relevant subscriptions
       self.destroy_subscription(self.opp_estimated_pose_sub.sub)
       self.destroy_subscription(self.camera_pose_sub.sub)
       self.destroy_subscription(self.aruco_pose_sub.sub)
+      self.destroy_subscription(self.state_estimate_sub.sub)
 
-  def write_eval_data(self, time_list, ground_truth_list, estimated_distance_list, curr_time):
+  def write_eval_data(self, time_list, ground_truth_list, estimated_distance_list, state_list, curr_time):
     """
     Write the evaluation data to a file
     """
-    data = np.column_stack((time_list, ground_truth_list, estimated_distance_list))
-    np.savetxt(f'{self.FIGURES_DIR}/{curr_time}/data.txt', data, delimiter=',', header='Time,Ground Truth,Estimated Distance', comments='')
+    data = np.column_stack((time_list,
+                            ground_truth_list,
+                            estimated_distance_list,
+                            [sqrt(np.sum(np.array([state.position.x, state.position.y, state.position.z])**2)) if state is not np.nan else np.nan for state in state_list],
+                            [sqrt(np.sum(np.array([state.linear_velocity.x, state.linear_velocity.y, state.linear_velocity.z])**2)) if state is not np.nan else np.nan for state in state_list],
+                            [sqrt(np.sum(np.array([state.linear_acceleration.x, state.linear_acceleration.y, state.linear_acceleration.z])**2)) if state is not np.nan else np.nan for state in state_list]))
+    np.savetxt(f'{self.FIGURES_DIR}/{curr_time}/data.txt', data, delimiter=',', header='Time,Ground Truth,Recorded Distance, Estimated Distance, Estimated Speed, Estimated Acceleration', comments='')
 
   def read_eval_data(self, curr_time):
     """
@@ -176,13 +193,19 @@ class Evaluation(Node):
 
     return time_list, ground_truth_list, estimated_distance_list
   
-  def plot_time_diff(self, time_list, ground_truth_list, estimated_distance_list, curr_time):
+  def plot_time_diff(self, time_list, ground_truth_list, estimated_distance_list, state_list, curr_time):
     """
     Plot the difference between the ground truth and estimated distance
     """
     plt.clf()
+
+    distance_list = [sqrt(np.sum(np.array([state.position.x, state.position.y, state.position.z])**2)) if state is not np.nan else np.nan for state in state_list]
+
     sns.pointplot(x=time_list, y=np.array(ground_truth_list) - np.array(estimated_distance_list),
-                  color='blue', native_scale=True, label='Distance Error',
+                  color='blue', native_scale=True, label='Measured Distance Error',
+                  ms=3, linewidth=1, marker='.')
+    sns.pointplot(x=time_list, y=np.array(ground_truth_list) - np.array(distance_list),
+                  color='red', native_scale=True, label='Filtered Distance Error',
                   ms=3, linewidth=1, marker='.')
 
     # Add labels and title to the plot
@@ -230,6 +253,46 @@ class Evaluation(Node):
 
     # Save the plot as an image
     plt.savefig(f'{self.FIGURES_DIR}/{curr_time}/distance_plot.png')
+  
+  def plot_state(self, ground_truth_list, estimated_distance_list, state_list, curr_time):
+    """
+    Plot the ground truth and estimated state
+    """
+    plt.clf()
+
+    time_list = [get_time_from_header(state.header) if state is not np.nan else np.nan for state in state_list]
+    position_list = [(state.position.x, state.position.y, state.position.z) if state is not np.nan else np.nan for state in state_list]
+    linear_velocity_list = [(state.linear_velocity.x, state.linear_velocity.y, state.linear_velocity.z) if state is not np.nan else np.nan for state in state_list]
+    linear_acceleration_list = [(state.linear_acceleration.x, state.linear_acceleration.y, state.linear_acceleration.z) if state is not np.nan else np.nan for state in state_list]
+
+    distance_list = [sqrt(np.sum(np.array(pos)**2)) if pos is not np.nan else np.nan for pos in position_list]
+    speed_list = [sqrt(np.sum(np.array(vel)**2)) if vel is not np.nan else np.nan for vel in linear_velocity_list]
+    acceleration_list = [sqrt(np.sum(np.array(acc)**2)) if acc is not np.nan else np.nan for acc in linear_acceleration_list]
+
+    sns.pointplot(x=time_list, y=distance_list, color='red',
+                  native_scale=True, label='Estimated Distance', ms=3,
+                  linewidth=1, marker='.')
+    sns.pointplot(x=time_list, y=speed_list, color='green',
+                  native_scale=True, label='Estimated Speed', ms=3,
+                  linewidth=1, marker='.')
+    sns.pointplot(x=time_list, y=acceleration_list, color='blue',
+                  native_scale=True, label='Estimated Linear Acceleration', ms=3,
+                  linewidth=1, marker='.')
+    sns.pointplot(x=time_list, y=ground_truth_list, color='black',
+                  native_scale=True, label='Ground Truth', ms=3,
+                  linewidth=1, marker='.')
+    sns.pointplot(x=time_list, y=estimated_distance_list, color='magenta',
+                  native_scale=True, label='Measured Distance', ms=3,
+                  linewidth=1, marker='.')
+
+    # Add labels and title to the plot
+    plt.xlabel('Time (s)')
+    plt.ylabel('Meters')
+    plt.title('Ground Truth vs Estimated State')
+    plt.ylim(0, 6)
+
+    # Save the plot as an image
+    plt.savefig(f'{self.FIGURES_DIR}/{curr_time}/state_plot.png')
   
   def agent_pose_callback(self, data: TFMessage):
     """

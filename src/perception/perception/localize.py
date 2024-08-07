@@ -144,7 +144,7 @@ class CarLocalizer(Node):
     current_frame = cv2.cvtColor(current_frame, cv2.COLOR_BGR2RGB)
 
     # Add subpixel refinement to marker detector
-    detector_params = cv2.aruco.DetectorParameters_create()
+    detector_params = cv2.aruco.DetectorParameters()
     detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
 
     marker_corners, marker_ids, _ = cv2.aruco.detectMarkers(

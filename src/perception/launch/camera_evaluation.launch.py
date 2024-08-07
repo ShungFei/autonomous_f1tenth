@@ -210,6 +210,18 @@ def spawn_func(context, *args, **kwargs):
             emulate_tty=True,
         ),
         Node(
+            package="perception",
+            executable="state_estimation",
+            name="state_estimation",
+            output="screen",
+            parameters=[
+                {
+                    "opponent_name": opponent_name,
+                }
+            ],
+            emulate_tty=True,
+        ),
+        Node(
             package="ros_gz_bridge",
             executable="parameter_bridge",
             arguments=[

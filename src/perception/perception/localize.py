@@ -75,7 +75,8 @@ class CarLocalizer(Node):
     )
 
     self.eval_sub = ApproximateTimeSynchronizer(
-        [self.color_image_sub, self.depth_image_sub],
+        # Add self.depth_image_sub if depth required
+        [self.color_image_sub],
         10,
         0.1,
     )
@@ -102,7 +103,7 @@ class CarLocalizer(Node):
     # Used to convert between ROS and OpenCV images
     self.bridge = CvBridge()
 
-  def pose_pub_callback(self, image: Image, depth_image: Image):
+  def pose_pub_callback(self, image: Image):
     """
     Publish the estimated pose of the opponent
     """
@@ -153,6 +154,7 @@ class CarLocalizer(Node):
         print('corners', marker_corners[0])
         print('rvec', rvec)
         print('tvec', tvec)
+        print('distance', sqrt(np.sum((tvec)**2)))
       return rvec, tvec
     else:
       return None, None

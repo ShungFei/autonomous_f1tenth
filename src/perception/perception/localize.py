@@ -5,6 +5,7 @@ from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import Vector3Stamped, PoseStamped
 from cv_bridge import CvBridge
 from message_filters import Subscriber, ApproximateTimeSynchronizer
+from datetime import datetime
 import cv2
 import os
 import numpy as np
@@ -23,11 +24,9 @@ class CarLocalizer(Node):
     Class constructor to set up the node
     """
     super().__init__('car_localizer')
-    
-    self.debug_dir = "debug_images"
-    # Create a directory to save images
-    if not os.path.exists(self.debug_dir):
-      os.makedirs(self.debug_dir)
+
+    curr_time = datetime.now().strftime('%y_%m_%d_%H:%M:%S')
+    self.DEBUG_DIR = f"perception_debug/{curr_time}"
 
     # Name of the cameras to use
     self.SELECTED_CAMERA = "color"
@@ -35,7 +34,7 @@ class CarLocalizer(Node):
 
     self.agent_name = self.declare_parameter('agent_name', "f1tenth").get_parameter_value().string_value
     self.camera_name = self.declare_parameter('camera_name', "d435").get_parameter_value().string_value
-    
+
     # Currently unused
     self.opponent_name = self.declare_parameter('opponent_name', "opponent").get_parameter_value().string_value
     self.debug = self.declare_parameter('debug', False).get_parameter_value().bool_value
@@ -43,10 +42,13 @@ class CarLocalizer(Node):
     self.get_logger().info(f"Subscribing to {self.agent_name}")
 
     if self.debug == True:
+      os.makedirs(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}", exist_ok=True)
+      self.video_output = cv2.VideoWriter(f"{self.DEBUG_DIR}/detection.avi", cv2.VideoWriter_fourcc(*'XVID'), 20.0, (1920, 1080))
+
       self.color_image_sub = self.create_subscription(
         Image, 
         f'{self.agent_name}/{self.camera_name}/{self.SELECTED_CAMERA}/image_raw', 
-        self.image_callback, 
+        lambda data: self.image_callback(self.SELECTED_CAMERA, data), 
         10)
       
     self.color_camera_info_sub = self.create_subscription(
@@ -87,10 +89,10 @@ class CarLocalizer(Node):
     self.aruco_dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_250)
 
     # Define the side length of the ArUco marker
-    side_length = 0.15
+    self.side_length = 0.15
 
     # Define the half side length
-    half_side_length = side_length / 2
+    half_side_length = self.side_length / 2
 
     # Define the 4 corners of the ArUco marker
     self.marker_obj_points = np.array([[
@@ -102,6 +104,10 @@ class CarLocalizer(Node):
 
     # Used to convert between ROS and OpenCV images
     self.bridge = CvBridge()
+
+  def destroy_node(self):
+    self.video_output.release()
+    super().destroy_node()
 
   def pose_pub_callback(self, image: Image):
     """
@@ -148,7 +154,7 @@ class CarLocalizer(Node):
     if len(marker_corners) > 0:
       # tvec contains position of marker in camera frame
       _, rvec, tvec = cv2.solvePnP(self.marker_obj_points, marker_corners[0], 
-                         self.color_intrinsics, 0, flags=cv2.SOLVEPNP_SQPNP)
+                         self.color_intrinsics, 0, flags=cv2.SOLVEPNP_IPPE_SQUARE)
       
       if self.debug == True:
         print('corners', marker_corners[0])
@@ -159,12 +165,10 @@ class CarLocalizer(Node):
     else:
       return None, None
 
-  def image_callback(self, data: Image):
+  def image_callback(self, selected_camera: str, data: Image):
     """
     Callback function for images from the camera
     """
-    saved_counter = 0
-
     # Convert ROS Image message to OpenCV image
     current_frame = self.bridge.imgmsg_to_cv2(data)
     current_frame = cv2.cvtColor(current_frame, cv2.COLOR_BGR2RGB)
@@ -178,24 +182,18 @@ class CarLocalizer(Node):
     if len(marker_corners) > 0:
       frame_copy = cv2.aruco.drawDetectedMarkers(frame_copy, marker_corners, marker_ids)
 
-      # These two approaches should produce the same result
-      rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(marker_corners, 75/720, self.color_intrinsics, self.dist_coeffs)
-      _, rvec, tvec = cv2.solvePnP(self.marker_obj_points, marker_corners[0], 
-                         self.color_intrinsics, np.array([0, 0, 0, 0, 0], dtype=np.float32), flags=cv2.SOLVEPNP_IPPE_SQUARE)
-      
+      rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(marker_corners, self.side_length, self.color_intrinsics, self.dist_coeffs)
+
       for i in range(len(rvecs)):
         frame_copy = cv2.aruco.drawAxis(frame_copy, self.color_intrinsics, self.dist_coeffs, rvecs[i], tvecs[i], 0.1)
       
-    # Save the image
-    # while saved_counter < 100:
-    #   cv2.imwrite(f"{self.debug_dir}/{data.header.stamp.nanosec}.jpg", current_frame)
-    #   saved_counter += 1
-      
-    # Display image
-    cv2.imshow("camera", frame_copy)
+    # Write image with detected pose to video
+    self.video_output.write(frame_copy)
 
-    cv2.waitKey(1)
-  
+    # Save image to debug directory
+    cv2.imwrite(f"{self.DEBUG_DIR}/{selected_camera}/{get_time_from_header(data.header)}.jpg", current_frame)
+
+
 def main(args=None):
 
   rclpy.init(args=args)

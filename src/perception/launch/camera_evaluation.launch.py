@@ -258,9 +258,9 @@ def spawn_func(context, *args, **kwargs):
 def generate_launch_description():
     pkg_f1tenth_description = get_package_share_directory("f1tenth_description")
 
-    world_arg = DeclareLaunchArgument(name="world", description="name of world")
+    world_arg = DeclareLaunchArgument(name="world", description="name of world", default_value="empty")
 
-    name_arg = DeclareLaunchArgument(name="name", description="name of robot spawned")
+    name_arg = DeclareLaunchArgument(name="name", description="name of robot spawned", default_value="f1tenth")
 
     camera_name_arg = DeclareLaunchArgument(
         name="camera_name",
@@ -293,15 +293,15 @@ def generate_launch_description():
     )
 
     x = DeclareLaunchArgument(
-        name="x", description="x position of robot", default_value="3.0"
+        name="x", description="x position of robot", default_value="-3.0"
     )
 
     y = DeclareLaunchArgument(
-        name="y", description="y position of robot", default_value="3.0"
+        name="y", description="y position of robot", default_value="0.0"
     )
 
     z = DeclareLaunchArgument(
-        name="z", description="z position of robot", default_value="3.0"
+        name="z", description="z position of robot", default_value="0.0"
     )
 
     R = DeclareLaunchArgument(

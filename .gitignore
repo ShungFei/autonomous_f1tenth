@@ -6,6 +6,7 @@ models
 notes
 training_logs
 perception_eval
+perception_debug
 checkpoint
 cares_reinforcement_learning
 __pycache__

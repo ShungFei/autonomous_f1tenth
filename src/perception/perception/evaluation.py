@@ -119,7 +119,10 @@ class Evaluation(Node):
       if self.debug == True:
         print('aruco', aruco_pose)
         print('camera', camera_pose)
-        print('detected', estimated_pose)
+        if estimated_pose.is_set:
+          print('detected', np.array([estimated_pose.pose.position.x, estimated_pose.pose.position.y, estimated_pose.pose.position.z]))
+        else:
+          print('detected', None)
 
       estimated_tvec = np.array([estimated_pose.pose.position.x, estimated_pose.pose.position.y, estimated_pose.pose.position.z])
 

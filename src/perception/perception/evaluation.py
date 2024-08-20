@@ -3,6 +3,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image, CameraInfo 
 from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import Vector3Stamped, PoseStamped
+from nav_msgs.msg import Odometry
 from cv_bridge import CvBridge
 from message_filters import Subscriber, ApproximateTimeSynchronizer
 import cv2
@@ -68,10 +69,24 @@ class Evaluation(Node):
       10
     )
 
+    self.agent_odom_sub = self.create_subscription(
+      Odometry,
+      f'/{self.agent_name}/odometry',
+      lambda msg: self.agent_odom_list.append(msg),
+      10
+    )
+
     self.opponent_pose_sub = self.create_subscription(
       TFMessage,
       f'{self.opponent_name}/pose',
       self.opponent_pose_callback,
+      10
+    )
+
+    self.opponent_odom_sub = self.create_subscription(
+      Odometry,
+      f'/{self.opponent_name}/odometry',
+      lambda msg: self.opponent_odom_list.append(msg),
       10
     )
 
@@ -108,13 +123,15 @@ class Evaluation(Node):
 
     self.time_list = []
     self.ground_truth_list = []
+    self.agent_odom_list = []
+    self.opponent_odom_list = []
     self.estimated_distance_list = []
     self.state_list = []
     self.ground_truth_state_list = []
 
     # Used to convert between ROS and OpenCV images
     self.bridge = CvBridge()
-
+  
   def eval_callback(self, estimated_pose: OptionalPoseStamped, camera_pose: Vector3Stamped, aruco_pose: Vector3Stamped, state_estimate: StateEstimateStamped):
     """
     Synced callback function for the camera image, depth image, camera pose, and ArUco pose for evaluation
@@ -163,6 +180,8 @@ class Evaluation(Node):
       self.plot_state(self.ground_truth_list, self.estimated_distance_list, self.state_list, curr_time)
 
       # Destroy all relevant subscriptions
+      self.destroy_subscription(self.agent_pose_sub)
+      self.destroy_subscription(self.opponent_odom_sub)
       self.destroy_subscription(self.opp_estimated_pose_sub.sub)
       self.destroy_subscription(self.camera_pose_sub.sub)
       self.destroy_subscription(self.aruco_pose_sub.sub)
@@ -269,6 +288,11 @@ class Evaluation(Node):
     speed_list = [sqrt(np.sum(np.array(vel)**2)) if vel is not np.nan else np.nan for vel in linear_velocity_list]
     acceleration_list = [sqrt(np.sum(np.array(acc)**2)) if acc is not np.nan else np.nan for acc in linear_acceleration_list]
 
+    twist_time_list = [get_time_from_header(self.opponent_odom_list[i].header) for i in range(len(self.opponent_odom_list))]
+    twist_linear_velocity_list = [sqrt(np.sum(np.array([self.opponent_odom_list[i].twist.twist.linear.x - self.agent_odom_list[i].twist.twist.linear.x,
+                                                        self.opponent_odom_list[i].twist.twist.linear.y - self.agent_odom_list[i].twist.twist.linear.y,
+                                                        self.opponent_odom_list[i].twist.twist.linear.z - self.agent_odom_list[i].twist.twist.linear.z])**2)) if i > 0 else np.nan for i in range(len(self.opponent_odom_list))]
+
     sns.pointplot(x=time_list, y=distance_list, color='red',
                   native_scale=True, label='Estimated Distance', ms=3,
                   linewidth=1, marker='.')
@@ -279,10 +303,13 @@ class Evaluation(Node):
                   native_scale=True, label='Estimated Linear Acceleration', ms=3,
                   linewidth=1, marker='.')
     sns.pointplot(x=time_list, y=ground_truth_list, color='black',
-                  native_scale=True, label='Ground Truth', ms=3,
+                  native_scale=True, label='Ground Truth Position', ms=3,
                   linewidth=1, marker='.')
     sns.pointplot(x=time_list, y=estimated_distance_list, color='magenta',
                   native_scale=True, label='Measured Distance', ms=3,
+                  linewidth=1, marker='.')
+    sns.pointplot(x=twist_time_list, y=twist_linear_velocity_list, color='cyan',
+                  native_scale=True, label='Twist Linear Velocity', ms=3,
                   linewidth=1, marker='.')
 
     # Add labels and title to the plot

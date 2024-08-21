@@ -3,7 +3,9 @@ from rclpy.node import Node
 import rclpy.time
 import rclpy.timer
 from tf2_msgs.msg import TFMessage
+import math
 import numpy as np
+from ackermann_msgs.msg import AckermannDriveStamped
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.publisher import Publisher
@@ -45,8 +47,10 @@ class Trajectory(Node):
     self.agent_name = self.declare_parameter('agent_name', "f1tenth").get_parameter_value().string_value
     self.camera_name = self.declare_parameter('camera_name', "d435").get_parameter_value().string_value
     self.opponent_name = self.declare_parameter('opponent_name', "opponent").get_parameter_value().string_value 
+    self.is_sim = self.declare_parameter('is_sim', True).get_parameter_value().bool_value
     self.is_stereo = self.declare_parameter('is_stereo', False).get_parameter_value().bool_value
     self.eval_time = self.declare_parameter('eval_time', 10.0).get_parameter_value().double_value
+    self.wheel_base = self.declare_parameter('wheel_base', 0.325).get_parameter_value().double_value
 
     self.start_agent_vel_pub = False
     self.start_opp_vel_pub = False
@@ -58,8 +62,22 @@ class Trajectory(Node):
     self.prev_aruco_pose = None
     self.aruco_pose = None
 
+    self.start_time = None
+
     self.agent_checkpoint = 0
     self.opp_checkpoint = 0
+
+    self.agent_ackermann_pub = self.create_publisher(
+      AckermannDriveStamped,
+      f'/{self.agent_name}/drive',
+      10
+    )
+
+    self.opp_ackermann_pub = self.create_publisher(
+      AckermannDriveStamped,
+      f'/{self.opponent_name}/drive',
+      10
+    )
 
     self.agent_vel_publisher = self.create_publisher(
       Twist,
@@ -125,15 +143,53 @@ class Trajectory(Node):
       self.start_opp_vel_pub = True
       self.start_opp_vel_time = get_time_from_header(header)
       self.destroy_subscription(self.opp_pose_sub)
-  
+
+  def twist_to_ackermann(omega, linear_v, L):
+    '''
+    Convert CG angular velocity to Ackerman steering angle.
+
+    Parameters:
+    - omega: CG angular velocity in rad/s
+    - v: Vehicle speed in m/s
+    - L: Wheelbase of the vehicle in m
+
+    Returns:
+    - delta: Ackerman steering angle in radians
+
+    Derivation:
+    R = v / omega 
+    R = L / tan(delta)  equation 10 from https://www.researchgate.net/publication/228464812_Electric_Vehicle_Stability_with_Rear_Electronic_Differential_Traction#pf3
+    tan(delta) = L * omega / v
+    delta = arctan(L * omega/ v)
+    '''
+    if linear_v == 0:
+        return 0
+
+    delta = math.atan((L * omega) / linear_v)
+
+    return delta
+
+
+  def ackermann_to_twist(delta, linear_v, L):
+      try: 
+          omega = math.tan(delta)*linear_v/L
+      except ZeroDivisionError:
+          print("Wheelbase must be greater than zero")
+          return 0
+      return omega
+
   def clock_callback(self, data: Clock):
-    if self.start_agent_vel_pub and self.start_opp_vel_pub and self.start_agent_vel_time is not None and self.start_opp_vel_time is not None:
+    if not self.is_sim or (self.start_agent_vel_pub and self.start_opp_vel_pub and self.start_agent_vel_time is not None and self.start_opp_vel_time is not None):
       time = get_time_from_clock(data)
 
       # Stop the vehicles after the evaluation time has passed
       if time >= self.eval_time:
-        self.agent_vel_publisher.publish(self.create_velocity_msg(0.0, 0.0))
-        self.opp_vel_publisher.publish(self.create_velocity_msg(0.0, 0.0))
+        if self.is_sim:
+          self.agent_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
+          self.opp_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
+        else:
+          self.agent_ackermann_pub.publish(self.create_ackermann_msg(0.0, 0.0))
+          self.opp_ackermann_pub.publish(self.create_ackermann_msg(0.0, 0.0))
         self.destroy_subscription(self.clock_sub)
         return
     
@@ -142,20 +198,36 @@ class Trajectory(Node):
         # The velocity is only published since the time the vehicle has settled (to prevent potential flipping)
         if time >= self.start_agent_vel_time + next_agent_timestep["time"]:
           self.agent_checkpoint += 1
-          self.agent_vel_publisher.publish(self.create_velocity_msg(next_agent_timestep["linear"], next_agent_timestep["angular"]))
+          if self.is_sim:
+            self.agent_vel_publisher.publish(self.create_twist_msg(next_agent_timestep["linear"], next_agent_timestep["angular"]))
+          else:
+            self.agent_ackermann_pub.publish(self.create_ackermann_msg(next_agent_timestep["linear"], next_agent_timestep["angular"]))
       if self.opp_checkpoint < len(self.vels["opponent"]):
         next_opp_timestep = self.vels["opponent"][self.opp_checkpoint]
         if time >= self.start_opp_vel_time + next_opp_timestep["time"]:
           self.opp_checkpoint += 1
-          self.opp_vel_publisher.publish(self.create_velocity_msg(next_opp_timestep["linear"], next_opp_timestep["angular"]))
+          if self.is_sim:
+            self.opp_vel_publisher.publish(self.create_twist_msg(next_opp_timestep["linear"], next_opp_timestep["angular"]))
+          else:
+            self.opp_ackermann_pub.publish(self.create_ackermann_msg(next_opp_timestep["linear"], next_opp_timestep["angular"]))
       
-  def create_velocity_msg(self, linear, angular):
+  def create_twist_msg(self, linear, angular):
     """
     Create a Twist message with the given linear and angular velocities
     """
     msg = Twist()
     msg.linear.x = linear
     msg.angular.z = angular
+
+    return msg
+  
+  def create_ackermann_msg(self, linear, angular):
+    """
+    Create an AckermannDriveStamped message with the given linear and angular velocities
+    """
+    msg = AckermannDriveStamped()
+    msg.drive.speed = linear
+    msg.drive.steering_angle = self.twist_to_ackermann(angular, linear, self.wheel_base)
 
     return msg
   

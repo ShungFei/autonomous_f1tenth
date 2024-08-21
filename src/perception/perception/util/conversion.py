@@ -1,6 +1,7 @@
 import numpy as np
 from std_msgs.msg import Header
 from rosgraph_msgs.msg import Clock
+from rclpy.clock import Clock as ROSClock
 
 def get_euler_from_quaternion(qx, qy, qz, qw):
   """
@@ -87,4 +88,18 @@ def get_time_from_clock(clock: Clock):
       :return time: The time in seconds
   """
   time = clock.clock.sec + clock.clock.nanosec * 1e-9
+  return time
+
+def get_time_from_rosclock(clock: ROSClock):
+  """
+  Convert the time from a ROS clock to seconds.
+    
+  Input
+      :param clock: The ROS clock
+    
+  Output
+      :return time: The time in seconds
+  """
+  sec, nanosec = clock.now().seconds_nanoseconds()
+  time = sec + nanosec * 1e-9
   return time

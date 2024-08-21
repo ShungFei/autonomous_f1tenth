@@ -13,7 +13,7 @@ from rclpy.timer import Timer
 from rosgraph_msgs.msg import Clock
 
 import perception.util.ground_truth as GroundTruth
-from perception.util.conversion import get_time_from_header, get_time_from_clock
+from perception.util.conversion import get_time_from_header, get_time_from_clock, get_time_from_rosclock
 from geometry_msgs.msg import Twist
 from controllers.controller import Controller
  
@@ -29,8 +29,8 @@ class Trajectory(Node):
     self.vels = {
       "agent": 
         [
-          {"time": 1.0, "linear": 0.2, "angular": 0.0},
-          {"time": 5.0, "linear": 0.0, "angular": 0.0}
+          {"time": 1.0, "linear": 0.4, "angular": 0.0},
+          {"time": 5.0, "linear": -0.4, "angular": 0.0}
         ],
       "opponent": 
         [
@@ -43,7 +43,7 @@ class Trajectory(Node):
 
     self.SELECTED_LEFT_CAMERA = "left"
     self.SELECTED_RIGHT_CAMERA = "right"
-
+    
     self.agent_name = self.declare_parameter('agent_name', "f1tenth").get_parameter_value().string_value
     self.camera_name = self.declare_parameter('camera_name', "d435").get_parameter_value().string_value
     self.opponent_name = self.declare_parameter('opponent_name', "opponent").get_parameter_value().string_value 
@@ -62,7 +62,7 @@ class Trajectory(Node):
     self.prev_aruco_pose = None
     self.aruco_pose = None
 
-    self.start_time = None
+    self.start_time = get_time_from_rosclock(self.get_clock())
 
     self.agent_checkpoint = 0
     self.opp_checkpoint = 0
@@ -98,12 +98,16 @@ class Trajectory(Node):
       10
     )
 
-    self.clock_sub = self.create_subscription(
-      Clock,
-      '/clock',
-      self.clock_callback,
-      10
-    )
+    if self.is_sim:
+      self.clock_sub = self.create_subscription(
+        Clock,
+        '/clock',
+        self.sim_clock_callback,
+        10
+      )
+    else:
+      self.clock_sub = self.create_timer(0.01, self.real_clock_callback)
+      
 
     self.opp_pose_sub = self.create_subscription(
       TFMessage,
@@ -111,6 +115,7 @@ class Trajectory(Node):
       self.opp_pose_callback,
       10
     )
+
 
   def agent_pose_callback(self, data: TFMessage):
     """
@@ -144,7 +149,7 @@ class Trajectory(Node):
       self.start_opp_vel_time = get_time_from_header(header)
       self.destroy_subscription(self.opp_pose_sub)
 
-  def twist_to_ackermann(omega, linear_v, L):
+  def twist_to_ackermann(self, omega, linear_v, L):
     '''
     Convert CG angular velocity to Ackerman steering angle.
 
@@ -163,7 +168,7 @@ class Trajectory(Node):
     delta = arctan(L * omega/ v)
     '''
     if linear_v == 0:
-        return 0
+        return 0.0
 
     delta = math.atan((L * omega) / linear_v)
 
@@ -178,18 +183,14 @@ class Trajectory(Node):
           return 0
       return omega
 
-  def clock_callback(self, data: Clock):
-    if not self.is_sim or (self.start_agent_vel_pub and self.start_opp_vel_pub and self.start_agent_vel_time is not None and self.start_opp_vel_time is not None):
+  def sim_clock_callback(self, data: Clock):
+    if (self.start_agent_vel_pub and self.start_opp_vel_pub and self.start_agent_vel_time is not None and self.start_opp_vel_time is not None):
       time = get_time_from_clock(data)
 
       # Stop the vehicles after the evaluation time has passed
       if time >= self.eval_time:
-        if self.is_sim:
-          self.agent_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
-          self.opp_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
-        else:
-          self.agent_ackermann_pub.publish(self.create_ackermann_msg(0.0, 0.0))
-          self.opp_ackermann_pub.publish(self.create_ackermann_msg(0.0, 0.0))
+        self.agent_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
+        self.opp_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
         self.destroy_subscription(self.clock_sub)
         return
     
@@ -198,19 +199,49 @@ class Trajectory(Node):
         # The velocity is only published since the time the vehicle has settled (to prevent potential flipping)
         if time >= self.start_agent_vel_time + next_agent_timestep["time"]:
           self.agent_checkpoint += 1
-          if self.is_sim:
-            self.agent_vel_publisher.publish(self.create_twist_msg(next_agent_timestep["linear"], next_agent_timestep["angular"]))
-          else:
-            self.agent_ackermann_pub.publish(self.create_ackermann_msg(next_agent_timestep["linear"], next_agent_timestep["angular"]))
+          self.agent_vel_publisher.publish(self.create_twist_msg(next_agent_timestep["linear"], next_agent_timestep["angular"]))
       if self.opp_checkpoint < len(self.vels["opponent"]):
         next_opp_timestep = self.vels["opponent"][self.opp_checkpoint]
         if time >= self.start_opp_vel_time + next_opp_timestep["time"]:
           self.opp_checkpoint += 1
-          if self.is_sim:
-            self.opp_vel_publisher.publish(self.create_twist_msg(next_opp_timestep["linear"], next_opp_timestep["angular"]))
-          else:
-            self.opp_ackermann_pub.publish(self.create_ackermann_msg(next_opp_timestep["linear"], next_opp_timestep["angular"]))
+          self.opp_vel_publisher.publish(self.create_twist_msg(next_opp_timestep["linear"], next_opp_timestep["angular"]))
       
+  def real_clock_callback(self):
+    time = get_time_from_rosclock(self.get_clock()) - self.start_time
+
+    # Stop the vehicles after the evaluation time has passed
+    if time >= self.eval_time:
+      if self.is_sim:
+        self.agent_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
+        self.opp_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
+      else:
+        self.agent_ackermann_pub.publish(self.create_ackermann_msg(0.0, 0.0))
+        self.opp_ackermann_pub.publish(self.create_ackermann_msg(0.0, 0.0))
+      self.destroy_subscription(self.clock_sub)
+      return
+  
+    if self.agent_checkpoint < len(self.vels["agent"]):
+      agent_timestep = self.vels["agent"][self.agent_checkpoint]
+      if self.agent_checkpoint == len(self.vels["agent"]) - 1:
+        next_agent_timestep = None
+      else:
+        next_agent_timestep = self.vels["agent"][self.agent_checkpoint + 1]
+      if next_agent_timestep and time >= next_agent_timestep["time"]:
+        self.agent_checkpoint += 1
+
+      self.agent_ackermann_pub.publish(self.create_ackermann_msg(agent_timestep["linear"], agent_timestep["angular"]))
+    
+    if self.opp_checkpoint < len(self.vels["opponent"]):
+      opp_timestep = self.vels["opponent"][self.opp_checkpoint]
+      if self.opp_checkpoint == len(self.vels["opponent"]) - 1:
+        next_opp_timestep = None
+      else:
+        next_opp_timestep = self.vels["opponent"][self.opp_checkpoint + 1]
+      if next_opp_timestep and time >= next_opp_timestep["time"]:
+        self.opp_checkpoint += 1
+
+      self.opp_ackermann_pub.publish(self.create_ackermann_msg(opp_timestep["linear"], opp_timestep["angular"]))
+
   def create_twist_msg(self, linear, angular):
     """
     Create a Twist message with the given linear and angular velocities

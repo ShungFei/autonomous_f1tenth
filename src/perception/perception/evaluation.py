@@ -5,7 +5,7 @@ from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import Vector3Stamped, PoseStamped
 from nav_msgs.msg import Odometry
 from cv_bridge import CvBridge
-from message_filters import Subscriber, ApproximateTimeSynchronizer
+from message_filters import Subscriber, TimeSynchronizer, ApproximateTimeSynchronizer
 import cv2
 import os
 import numpy as np
@@ -90,7 +90,7 @@ class Evaluation(Node):
       10
     )
 
-    self.opp_estimated_pose_sub = Subscriber(
+    self.opp_measured_pose_sub = Subscriber(
       self,
       OptionalPoseStamped,
       f'{self.opponent_name}/pose_estimate',
@@ -108,16 +108,16 @@ class Evaluation(Node):
       f'{self.opponent_name}/aruco_pose',
     )
 
-    self.state_estimate_sub = Subscriber(
-      self,
+    self.state_estimate_sub = self.create_subscription(
       StateEstimateStamped,
       f'{self.opponent_name}/state_estimate',
+      lambda msg: self.state_list.append(msg),
+      10
     )
 
-    self.eval_sub = ApproximateTimeSynchronizer(
-        [self.opp_estimated_pose_sub, self.camera_pose_sub, self.aruco_pose_sub, self.state_estimate_sub],
-        10,
-        0.1,
+    self.eval_sub = TimeSynchronizer(
+        [self.opp_measured_pose_sub, self.camera_pose_sub, self.aruco_pose_sub],
+        70
     )
     self.eval_sub.registerCallback(self.eval_callback)
 
@@ -132,32 +132,30 @@ class Evaluation(Node):
     # Used to convert between ROS and OpenCV images
     self.bridge = CvBridge()
   
-  def eval_callback(self, estimated_pose: OptionalPoseStamped, camera_pose: Vector3Stamped, aruco_pose: Vector3Stamped, state_estimate: StateEstimateStamped):
+  def eval_callback(self, measured_pose: OptionalPoseStamped, camera_pose: Vector3Stamped, aruco_pose: Vector3Stamped):
     """
     Synced callback function for the camera image, depth image, camera pose, and ArUco pose for evaluation
     """
     aruco_pose = np.array([aruco_pose.vector.x, aruco_pose.vector.y, aruco_pose.vector.z])
     camera_pose = np.array([camera_pose.vector.x, camera_pose.vector.y, camera_pose.vector.z])
-    curr_clock_time = get_time_from_header(estimated_pose.header)
-    print('time', curr_clock_time)
-    if aruco_pose is not None and camera_pose is not None and estimated_pose is not None:
+    curr_clock_time = get_time_from_header(measured_pose.header)
+    if aruco_pose is not None and camera_pose is not None and measured_pose is not None:
       if self.debug == True:
         print('aruco', aruco_pose)
         print('camera', camera_pose)
-        if estimated_pose.is_set:
-          print('detected', np.array([estimated_pose.pose.position.x, estimated_pose.pose.position.y, estimated_pose.pose.position.z]))
+        if measured_pose.is_set:
+          print('detected', np.array([measured_pose.pose.position.x, measured_pose.pose.position.y, measured_pose.pose.position.z]))
         else:
           print('detected', None)
 
-      estimated_tvec = np.array([estimated_pose.pose.position.x, estimated_pose.pose.position.y, estimated_pose.pose.position.z])
+      estimated_tvec = np.array([measured_pose.pose.position.x, measured_pose.pose.position.y, measured_pose.pose.position.z])
 
       # Append the data to the lists
       self.time_list.append(curr_clock_time)
       self.ground_truth_list.append(sqrt(np.sum((aruco_pose - camera_pose)**2)))
 
-      if estimated_pose.is_set:
+      if measured_pose.is_set:
         self.estimated_distance_list.append(sqrt(np.sum((estimated_tvec)**2)))
-        self.state_list.append(state_estimate)
       else:
         self.estimated_distance_list.append(np.nan)
         self.state_list.append(np.nan)
@@ -182,7 +180,7 @@ class Evaluation(Node):
       # Destroy all relevant subscriptions
       self.destroy_subscription(self.agent_pose_sub)
       self.destroy_subscription(self.opponent_odom_sub)
-      self.destroy_subscription(self.opp_estimated_pose_sub.sub)
+      self.destroy_subscription(self.opp_measured_pose_sub.sub)
       self.destroy_subscription(self.camera_pose_sub.sub)
       self.destroy_subscription(self.aruco_pose_sub.sub)
       self.destroy_subscription(self.state_estimate_sub.sub)
@@ -197,13 +195,13 @@ class Evaluation(Node):
                             [sqrt(np.sum(np.array([state.position.x, state.position.y, state.position.z])**2)) if state is not np.nan else np.nan for state in state_list],
                             [sqrt(np.sum(np.array([state.linear_velocity.x, state.linear_velocity.y, state.linear_velocity.z])**2)) if state is not np.nan else np.nan for state in state_list],
                             [sqrt(np.sum(np.array([state.linear_acceleration.x, state.linear_acceleration.y, state.linear_acceleration.z])**2)) if state is not np.nan else np.nan for state in state_list]))
-    np.savetxt(f'{self.FIGURES_DIR}/{curr_time}/data.txt', data, delimiter=',', header='Time,Ground Truth,Recorded Distance, Estimated Distance, Estimated Speed, Estimated Acceleration', comments='')
+    np.savetxt(f'{self.FIGURES_DIR}/{curr_time}/data.csv', data, delimiter=',', header='time,ground_truth_position,measured_distance,ground_truth_velocity,estimated_distance_magnitude,estimated_position_x,estimated_position_y,estimated_position_z,estimated_speed_magnitude,estimated_speed_x,estimated_speed_y,estimated_speed_z,estimated_acceleration_magnitude,estimated_acceleration_x,estimated_acceleration_y,estimated_acceleration_z', comments='')
 
   def read_eval_data(self, curr_time):
     """
     Read the evaluation data from a file
     """
-    data = np.genfromtxt(f'{self.FIGURES_DIR}/{curr_time}/data.txt', delimiter=',', skip_header=1)
+    data = np.genfromtxt(f'{self.FIGURES_DIR}/{curr_time}/data.csv', delimiter=',', skip_header=1)
 
     # Extract the columns into separate lists
     time_list = data[:, 0]

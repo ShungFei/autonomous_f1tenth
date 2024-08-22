@@ -33,6 +33,18 @@ class StateEstimator(Node):
       10
     )
 
+    self.velocity_rolling_regression_pub = self.create_publisher(
+      StateEstimateStamped,
+      f'{self.opponent_name}/state_estimate/velocity/rolling_regression',
+      10
+    )
+
+    self.velocity_baseline_pub = self.create_publisher(
+      StateEstimateStamped,
+      f'{self.opponent_name}/state_estimate/velocity/baseline',
+      10
+    )
+
   def initialize_kalman_filter(self, pose: OptionalPoseStamped = np.zeros(6), dt: float = 1 / 30):
     self.kf = KalmanFilter(dim_x=18, dim_z=6)
 
@@ -112,6 +124,11 @@ class StateEstimator(Node):
     msg.angular_acceleration.x, msg.angular_acceleration.y, msg.angular_acceleration.z = state_estimate[15:18]
     
     self.state_estimate_pub.publish(msg)
+
+def velocity_rolling_window_regression(data, window_size):
+  """
+  Estimate position and velocity of the opponent using rolling window regression on the given pose data
+  """
   
 
 def main(args=None):

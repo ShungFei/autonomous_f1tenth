@@ -28,6 +28,7 @@ setup(
             'trajectory = perception.trajectory:main',
             'evaluation = perception.evaluation:main',
             'state_estimation = perception.state_estimation:main',
+            'bev_track = perception.bev_track:main'
         ],
     },
 )

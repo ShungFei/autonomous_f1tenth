@@ -1,3 +1,4 @@
+from datetime import datetime
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CameraInfo 
@@ -25,11 +26,10 @@ class CarLocalizer(Node):
     Class constructor to set up the node
     """
     super().__init__('car_localizer')
-    
-    self.debug_dir = "debug_images"
-    # Create a directory to save images
-    if not os.path.exists(self.debug_dir):
-      os.makedirs(self.debug_dir)
+
+    curr_time = datetime.now().strftime('%y_%m_%d_%H:%M:%S')
+    fallback_debug_dir = f"perception_debug/{curr_time}"
+    self.DEBUG_DIR = self.declare_parameter('debug_dir', "perception_debug").get_parameter_value().string_value
 
     self.SELECTED_LEFT_CAMERA = "left"
     self.SELECTED_RIGHT_CAMERA = "right"

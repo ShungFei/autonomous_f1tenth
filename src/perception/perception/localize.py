@@ -26,7 +26,9 @@ class CarLocalizer(Node):
     super().__init__('car_localizer')
 
     curr_time = datetime.now().strftime('%y_%m_%d_%H:%M:%S')
-    self.DEBUG_DIR = f"perception_debug/{curr_time}"
+    fallback_debug_dir = f"perception_debug/{curr_time}"
+
+    self.DEBUG_DIR = self.declare_parameter('debug_dir', fallback_debug_dir).get_parameter_value().string_value
 
     # Name of the cameras to use
     self.SELECTED_CAMERA = "color"

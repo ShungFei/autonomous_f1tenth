@@ -1,3 +1,4 @@
+from datetime import datetime
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Vector3Stamped, PoseStamped
@@ -15,6 +16,12 @@ class StateEstimator(Node):
     Class constructor to set up the node
     """
     super().__init__('state_estimation')
+
+    curr_time = datetime.now().strftime('%y_%m_%d_%H:%M:%S')
+    fallback_debug_dir = f"perception_debug/{curr_time}"
+    self.DEBUG_DIR = self.declare_parameter('debug_dir', fallback_debug_dir).get_parameter_value().string_value
+
+
     # self.agent_name = self.declare_parameter('agent_name', "f1tenth").get_parameter_value().string_value
     # self.camera_name = self.declare_parameter('camera_name', "d435").get_parameter_value().string_value
     self.opponent_name = self.declare_parameter('opponent_name', "opponent").get_parameter_value().string_value

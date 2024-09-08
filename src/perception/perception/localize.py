@@ -13,7 +13,6 @@ from math import sqrt
 
 import perception.util.ground_truth as GroundTruth
 from perception.util.conversion import get_time_from_header, get_quaternion_from_rotation_matrix
-from perception_interfaces.msg import OptionalPoseStamped
 
 class CarLocalizer(Node):
   """
@@ -61,7 +60,7 @@ class CarLocalizer(Node):
     )
 
     self.opp_estimated_pose_pub = self.create_publisher(
-      OptionalPoseStamped,
+      PoseStamped,
       f'{self.opponent_name}/pose_estimate',
       10
     )
@@ -122,17 +121,13 @@ class CarLocalizer(Node):
       quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
 
       # Publish the estimated pose
-      msg = OptionalPoseStamped()
+      msg = PoseStamped()
 
-      msg.is_set = True
       msg.header = image.header
       msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = tvec[0][0], tvec[1][0], tvec[2][0]
       msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w = quaternion
 
       self.opp_estimated_pose_pub.publish(msg)
-    else:
-      self.opp_estimated_pose_pub.publish(OptionalPoseStamped(
-        header=image.header, is_set=False))
 
   def camera_info_callback(self, data: CameraInfo):
     self.color_intrinsics = data.k.reshape(3, 3)

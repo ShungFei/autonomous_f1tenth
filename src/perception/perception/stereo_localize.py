@@ -10,7 +10,6 @@ from cv_bridge import CvBridge
 from message_filters import Subscriber, ApproximateTimeSynchronizer
 
 import perception.util.ground_truth as GroundTruth
-from perception_interfaces.msg import OptionalPoseStamped
 
 import cv2
 import os
@@ -70,7 +69,7 @@ class CarLocalizer(Node):
       )
 
     self.opp_estimated_pose_pub = self.create_publisher(
-      OptionalPoseStamped,
+      PoseStamped,
       f'{self.opponent_name}/pose_estimate',
       10
     )
@@ -138,15 +137,11 @@ class CarLocalizer(Node):
         print('distance', sqrt(np.sum((tvec)**2)))
     
       # Publish the estimated pose
-      msg = OptionalPoseStamped()
-      msg.is_set = True
+      msg = PoseStamped()
       msg.header = left_image.header
       msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = float(tvec[0]), float(tvec[1]), float(tvec[2])
 
       self.opp_estimated_pose_pub.publish(msg)
-    else:
-      self.opp_estimated_pose_pub.publish(OptionalPoseStamped(
-        header=left_image.header, is_set=False))
   
   def left_camera_info_callback(self, data: CameraInfo):
     self.left_intrinsics = data.k.reshape(3, 3)

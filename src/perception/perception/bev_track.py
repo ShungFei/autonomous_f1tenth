@@ -18,7 +18,6 @@ import pyzed.sl as sl
 
 import perception.util.ground_truth as GroundTruth
 from perception.util.conversion import get_time_from_header, get_time_from_rosclock, get_quaternion_from_rotation_matrix
-from perception_interfaces.msg import OptionalPoseStamped
 
 class BevTracker(Node):
   """

@@ -8,7 +8,7 @@ from filterpy.common import Q_discrete_white_noise
 from scipy.linalg import block_diag
 
 from perception.util.conversion import get_time_from_header, get_euler_from_quaternion
-from perception_interfaces.msg import OptionalPoseStamped, StateEstimateStamped
+from perception_interfaces.msg import StateEstimateStamped
 
 class StateEstimator(Node):
   def __init__(self):
@@ -28,7 +28,7 @@ class StateEstimator(Node):
     # self.debug = self.declare_parameter('debug', False).get_parameter_value().bool_value
 
     self.opp_estimated_pose_sub = self.create_subscription(
-      OptionalPoseStamped,
+      PoseStamped,
       f'{self.opponent_name}/pose_estimate',
       self.pose_callback,
       10
@@ -52,7 +52,7 @@ class StateEstimator(Node):
       10
     )
 
-  def initialize_kalman_filter(self, pose: OptionalPoseStamped = np.zeros(6), dt: float = 1 / 30):
+  def initialize_kalman_filter(self, pose: PoseStamped = np.zeros(6), dt: float = 1 / 30):
     self.kf = KalmanFilter(dim_x=18, dim_z=6)
 
     # State
@@ -102,7 +102,7 @@ class StateEstimator(Node):
     self.kf.H[3:, 9:12] = np.eye(3)
 
 
-  def pose_callback(self, data: OptionalPoseStamped):
+  def pose_callback(self, data: PoseStamped):
     """Estimate the velocity and acceleration of the opponent using the pose as measurement input to a Kalman filter"""
     time = get_time_from_header(data.header)
 

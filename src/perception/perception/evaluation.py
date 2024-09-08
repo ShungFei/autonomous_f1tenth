@@ -18,7 +18,7 @@ from datetime import datetime
 
 import perception.util.ground_truth as GroundTruth
 from perception.util.conversion import get_time_from_header, get_quaternion_from_rotation_matrix
-from perception_interfaces.msg import OptionalPoseStamped, StateEstimateStamped
+from perception_interfaces.msg import StateEstimateStamped
 
 class Evaluation(Node):
   def __init__(self):
@@ -92,7 +92,7 @@ class Evaluation(Node):
 
     self.opp_measured_pose_sub = Subscriber(
       self,
-      OptionalPoseStamped,
+      PoseStamped,
       f'{self.opponent_name}/pose_estimate',
     )
 
@@ -132,7 +132,7 @@ class Evaluation(Node):
     # Used to convert between ROS and OpenCV images
     self.bridge = CvBridge()
   
-  def eval_callback(self, measured_pose: OptionalPoseStamped, camera_pose: Vector3Stamped, aruco_pose: Vector3Stamped):
+  def eval_callback(self, measured_pose: PoseStamped, camera_pose: Vector3Stamped, aruco_pose: Vector3Stamped):
     """
     Synced callback function for the camera image, depth image, camera pose, and ArUco pose for evaluation
     """
@@ -143,22 +143,14 @@ class Evaluation(Node):
       if self.debug == True:
         print('aruco', aruco_pose)
         print('camera', camera_pose)
-        if measured_pose.is_set:
-          print('detected', np.array([measured_pose.pose.position.x, measured_pose.pose.position.y, measured_pose.pose.position.z]))
-        else:
-          print('detected', None)
+        print('detected', np.array([measured_pose.pose.position.x, measured_pose.pose.position.y, measured_pose.pose.position.z]))
 
       estimated_tvec = np.array([measured_pose.pose.position.x, measured_pose.pose.position.y, measured_pose.pose.position.z])
 
       # Append the data to the lists
       self.time_list.append(curr_clock_time)
       self.ground_truth_list.append(sqrt(np.sum((aruco_pose - camera_pose)**2)))
-
-      if measured_pose.is_set:
-        self.estimated_distance_list.append(sqrt(np.sum((estimated_tvec)**2)))
-      else:
-        self.estimated_distance_list.append(np.nan)
-        self.state_list.append(np.nan)
+      self.estimated_distance_list.append(sqrt(np.sum((estimated_tvec)**2)))
 
       # print('time', curr_clock_time)
       # print('ground truth distance:', sqrt(np.sum((aruco_pose - camera_pose)**2)))

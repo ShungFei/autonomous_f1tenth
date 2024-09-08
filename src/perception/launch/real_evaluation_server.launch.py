@@ -53,6 +53,7 @@ def spawn_func(context, *args, **kwargs):
                 "agent_name": agent_name,
                 "camera_name": camera_name,
                 "opponent_name": opponent_name,
+                "is_sim": False,
                 "is_stereo": False,
                 "eval_time": eval_time,
             }
@@ -113,6 +114,17 @@ def spawn_func(context, *args, **kwargs):
         state_estimation_node,
         localize_node,
         TimerAction(period=3.0, actions=[trajectory_node]), # trajectory should start publishing after the cameras have initialized
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=trajectory_node,
+                on_exit=[
+                    LogInfo(msg=(EnvironmentVariable(name='USER'),
+                            ' destroyed the trajectory node')),
+                    EmitEvent(event=Shutdown(
+                        reason='Trajectory completed. Shutting down.')),
+                ]
+            )
+        ),
     ]
 def generate_launch_description():
 

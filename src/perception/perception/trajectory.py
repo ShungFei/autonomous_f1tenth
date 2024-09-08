@@ -1,3 +1,4 @@
+import os
 import rclpy
 from rclpy.node import Node
 import rclpy.time
@@ -43,11 +44,13 @@ class Trajectory(Node):
 
     self.SELECTED_LEFT_CAMERA = "left"
     self.SELECTED_RIGHT_CAMERA = "right"
+
+    self.END_BUFFER_TIME = 1.0
     
     self.agent_name = self.declare_parameter('agent_name', "f1tenth").get_parameter_value().string_value
     self.camera_name = self.declare_parameter('camera_name', "d435").get_parameter_value().string_value
     self.opponent_name = self.declare_parameter('opponent_name', "opponent").get_parameter_value().string_value 
-    self.is_sim = self.declare_parameter('is_sim', True).get_parameter_value().bool_value
+    self.is_sim = self.declare_parameter('is_sim', False).get_parameter_value().bool_value
     self.is_stereo = self.declare_parameter('is_stereo', False).get_parameter_value().bool_value
     self.eval_time = self.declare_parameter('eval_time', 10.0).get_parameter_value().double_value
     self.wheel_base = self.declare_parameter('wheel_base', 0.325).get_parameter_value().double_value
@@ -61,8 +64,6 @@ class Trajectory(Node):
     self.camera_pose = None
     self.prev_aruco_pose = None
     self.aruco_pose = None
-
-    self.start_time = get_time_from_rosclock(self.get_clock())
 
     self.agent_checkpoint = 0
     self.opp_checkpoint = 0
@@ -99,6 +100,7 @@ class Trajectory(Node):
     )
 
     if self.is_sim:
+      self.start_time = 0
       self.clock_sub = self.create_subscription(
         Clock,
         '/clock',
@@ -106,6 +108,7 @@ class Trajectory(Node):
         10
       )
     else:
+      self.start_time = get_time_from_rosclock(self.get_clock())
       self.clock_sub = self.create_timer(0.01, self.real_clock_callback)
       
 
@@ -188,11 +191,12 @@ class Trajectory(Node):
       time = get_time_from_clock(data)
 
       # Stop the vehicles after the evaluation time has passed
-      if time >= self.eval_time:
+      print(time, self.start_time, self.eval_time, self.END_BUFFER_TIME)
+      if time >= self.start_time + self.eval_time + self.END_BUFFER_TIME:
+        print("Stopping vehicles")
         self.agent_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
         self.opp_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
-        self.destroy_subscription(self.clock_sub)
-        return
+        raise SystemExit
     
       if self.agent_checkpoint < len(self.vels["agent"]):
         next_agent_timestep = self.vels["agent"][self.agent_checkpoint]
@@ -210,15 +214,14 @@ class Trajectory(Node):
     time = get_time_from_rosclock(self.get_clock()) - self.start_time
 
     # Stop the vehicles after the evaluation time has passed
-    if time >= self.eval_time:
+    if time >= self.start_time + self.eval_time + self.END_BUFFER_TIME:
       if self.is_sim:
         self.agent_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
         self.opp_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
       else:
         self.agent_ackermann_pub.publish(self.create_ackermann_msg(0.0, 0.0))
         self.opp_ackermann_pub.publish(self.create_ackermann_msg(0.0, 0.0))
-      self.destroy_subscription(self.clock_sub)
-      return
+      raise SystemExit
   
     if self.agent_checkpoint < len(self.vels["agent"]):
       agent_timestep = self.vels["agent"][self.agent_checkpoint]
@@ -268,20 +271,20 @@ def main(args=None):
   AGENT_CAR_NAME = "f1tenth"
   OPPONENT_CAR_NAME = "opponent"
 
+  trajectory = Trajectory()
+
+  # Need MultiThreadedExecutor for rates
+  # 
+  # "Care should be taken when calling this from a callback. 
+  #  This may block forever if called in a callback in a SingleThreadedExecutor."
+  # executor = MultiThreadedExecutor()
+  # executor.add_node(trajectory)
+
   try:
-    trajectory = Trajectory()
-
-    # Need MultiThreadedExecutor for rates
-    # 
-    # "Care should be taken when calling this from a callback. 
-    #  This may block forever if called in a callback in a SingleThreadedExecutor."
-    executor = MultiThreadedExecutor()
-    executor.add_node(trajectory)
-
-    try:
-      executor.spin()
-    finally:
-      executor.shutdown()
-      trajectory.destroy_node()
+    # executor.spin()
+    rclpy.spin(trajectory)
+  except SystemExit:
+    pass
   finally:
+    trajectory.destroy_node()
     rclpy.shutdown()

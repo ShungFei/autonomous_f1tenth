@@ -236,8 +236,10 @@ def main(args=None):
   try:
       executor.spin()
   except KeyboardInterrupt:
-      bev_tracker.destroy_node()
-      rclpy.shutdown()
+    pass
+
+  bev_tracker.destroy_node()
+  rclpy.shutdown()
   
 if __name__ == '__main__':
   main()

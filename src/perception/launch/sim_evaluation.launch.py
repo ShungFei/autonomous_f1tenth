@@ -156,20 +156,20 @@ def spawn_func(context, *args, **kwargs):
     R = LaunchConfiguration("R").perform(context)
     P = LaunchConfiguration("P").perform(context)
     Y = LaunchConfiguration("Y").perform(context)
-
-    evaluation_node = Node(
+    
+    trajectory_node = Node(
         package="perception",
-        executable="evaluation",
-        name="evaluation",
+        executable="trajectory",
+        name="trajectory",
         output="screen",
         parameters=[
             {
                 "agent_name": name,
                 "camera_name": camera_name if is_stereo == "false" else stereo_camera_name,
                 "opponent_name": opponent_name,
-                "eval_time": eval_time,
+                "is_sim": True,
                 "is_stereo": is_stereo == "true",
-                "debug": debug,
+                "eval_time": eval_time,
             }
         ],
         emulate_tty=True,
@@ -192,22 +192,6 @@ def spawn_func(context, *args, **kwargs):
         ),
         *spawn_model_from_xacro(
             xacro_file, opponent_name, 0, 0, 0, 0, 0, 0, add_aruco="true"
-        ),
-        Node(
-            package="perception",
-            executable="trajectory",
-            name="trajectory",
-            output="screen",
-            parameters=[
-                {
-                    "agent_name": name,
-                    "camera_name": camera_name if is_stereo == "false" else stereo_camera_name,
-                    "opponent_name": opponent_name,
-                    "is_stereo": is_stereo == "true",
-                    "eval_time": eval_time,
-                }
-            ],
-            emulate_tty=True,
         ),
         Node(
             package="perception",
@@ -258,15 +242,21 @@ def spawn_func(context, *args, **kwargs):
                 (f"/world/{world}/model/{name}/joint_state", f"/{name}/joint_states"),
             ],
         ),
-        evaluation_node,
+        trajectory_node,
         RegisterEventHandler(
             OnProcessExit(
-                target_action=evaluation_node,
+                target_action=trajectory_node,
                 on_exit=[
                     LogInfo(msg=(EnvironmentVariable(name='USER'),
-                            ' destroyed the evaluation node')),
+                            ' destroyed the trajectory node')),
+                    ExecuteProcess(
+                        cmd=[[
+                            "pkill -f \"gz sim\"" # Simulation does not stop on its own when Shutdown event is emitted
+                        ]],
+                        shell=True
+                    ),
                     EmitEvent(event=Shutdown(
-                        reason='Evaluation compelte'))
+                        reason='Trajectory completed. Shutting down.')),
                 ]
             )
         ),

@@ -220,7 +220,10 @@ def main(args=None):
   
   car_localizer = CarLocalizer()
   
-  rclpy.spin(car_localizer)
+  try:
+    rclpy.spin(car_localizer)
+  except KeyboardInterrupt:
+    pass
   
   car_localizer.destroy_node()
   

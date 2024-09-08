@@ -56,8 +56,6 @@ class BevTracker(Node):
       10
     )
 
-    self.right_intrinsics = None
-    self.right_dist_coeffs = None
     self.aruco_dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_250)
 
     self.measurements = {}
@@ -101,8 +99,6 @@ class BevTracker(Node):
         [0, 0, 1]
     ])
     self.right_dist_coeffs = np.array(right_camera_info_sl.disto)
-    print(self.right_intrinsics)
-    print(self.right_dist_coeffs)
 
     self.reentrant_callback_group = ReentrantCallbackGroup()
     self.capture_timer = self.create_timer(1 / (self.fps - 10), self.capture_callback)
@@ -112,6 +108,9 @@ class BevTracker(Node):
     self.image_queue = Queue()
 
   def capture_callback(self):
+    """
+    Capture images from the Zed camera and place them in a queue (Zed SDK version)
+    """
     image = sl.Mat()
     if self.zed.grab(self.runtime_parameters) == sl.ERROR_CODE.SUCCESS:
       # A new image is available if grab() returns SUCCESS
@@ -119,28 +118,21 @@ class BevTracker(Node):
       timestamp = self.zed.get_timestamp(sl.TIME_REFERENCE.CURRENT)  # Get the timestamp at the time the image was captured
       
       curr_time = timestamp.get_milliseconds()
-      ros_time = get_time_from_rosclock(self.get_clock()) * 1000
-
-      # print("Image resolution: {0} x {1} || Image timestamp: {2} {3} {4}\n".format(image.get_width(), image.get_height(),
-      #       curr_time - self.previous, curr_time, ros_time))
       image_np = image.numpy()
-      self.image_queue.put((curr_time, self.prev_time_capture, image_np))
 
-      print('capture', curr_time - self.prev_time_capture)
+      arucos = self.locate_arucos(image_np)
+      cv2.imwrite(f"{self.DEBUG_DIR}/{curr_time}.jpg", image_np)
+      # self.image_queue.put((curr_time, self.prev_time_capture, image_np))
 
-      # self.measurements[curr_time] = arucos
+      print(curr_time - self.prev_time_capture)
+      # print(arucos)
 
-      # current_frame = self.bridge.imgmsg_to_cv2(image)
-      
-      # # Save image to debug directory
-      # cv2.imwrite(f"{self.DEBUG_DIR}/{get_time_from_header(image.header)}.jpg", current_frame)
-
-      # if rvec is not None and tvec is not None:
-      #   rot_matrix, _ = cv2.Rodrigues(rvec)
-      #   quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
       self.prev_time_capture = curr_time
 
   def process_image_callback(self):
+    """
+    Process images from the Zed camera queue (Zed SDK version)
+    """
     if not self.image_queue.empty():
       curr_time, prev_time_capture, image_np = self.image_queue.get()
       arucos = self.locate_arucos(image_np)
@@ -198,12 +190,12 @@ class BevTracker(Node):
                             self.right_intrinsics, 0, flags=cv2.SOLVEPNP_IPPE_SQUARE)
         # print(id, marker, rvec, tvec)
         arucos[id[0]] = (rvec, tvec)
-        if self.debug == True:
-            print('id', id[0])
-            print('corners', marker)
-            print('rvec', rvec)
-            print('tvec', tvec)
-            print('distance', sqrt(np.sum((tvec)**2)))
+        # if self.debug == True:
+        #     print('id', id[0])
+        #     print('corners', marker)
+        #     print('rvec', rvec)
+        #     print('tvec', tvec)
+        #     print('distance', sqrt(np.sum((tvec)**2)))
     return arucos
 
   def image_callback(self, selected_camera: str, data: Image):

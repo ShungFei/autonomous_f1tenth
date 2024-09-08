@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 
 from ament_index_python import get_package_share_directory
@@ -62,27 +63,16 @@ def spawn_func(context, *args, **kwargs):
     camera_name = LaunchConfiguration("camera_name").perform(context)
     bev_camera_name = LaunchConfiguration("stereo_camera_name").perform(context)
     opponent_name = LaunchConfiguration("opponent_name").perform(context)
+    fps = int(LaunchConfiguration("fps").perform(context))
+    side_length = float(LaunchConfiguration("side_length").perform(context))
 
     debug = LaunchConfiguration("debug").perform(context).lower() == "true"
     eval_time = float(LaunchConfiguration("eval_time").perform(context))
 
-    evaluation_node = Node(
-        package="perception",
-        executable="evaluation",
-        name="evaluation",
-        output="screen",
-        parameters=[
-            {
-                "agent_name": name,
-                "camera_name": camera_name,
-                "opponent_name": opponent_name,
-                "eval_time": eval_time,
-                "is_stereo": False,
-                "debug": debug,
-            }
-        ],
-        emulate_tty=True,
-    )
+    current_time = datetime.now().strftime('%y_%m_%d_%H:%M:%S')
+    debug_dir = f"perception_debug/{current_time}"
+    if not os.path.exists(debug_dir):
+        os.makedirs(debug_dir)
 
     return [
         Node(
@@ -109,11 +99,11 @@ def spawn_func(context, *args, **kwargs):
             parameters=[
                 {
                     "opponent_name": opponent_name,
+                    "debug_dir": debug_dir,
                 }
             ],
             emulate_tty=True,
         ),
-        evaluation_node,
         Node(
             package="perception",
             executable="localize",
@@ -125,21 +115,28 @@ def spawn_func(context, *args, **kwargs):
                     "camera_name": camera_name,
                     "opponent_name": opponent_name,
                     "debug": debug,
+                    "debug_dir": debug_dir,
                 }
             ],
             emulate_tty=True,
         ),
-        RegisterEventHandler(
-            OnProcessExit(
-                target_action=evaluation_node,
-                on_exit=[
-                    LogInfo(msg=(EnvironmentVariable(name='USER'),
-                            ' destroyed the evaluation node')),
-                    EmitEvent(event=Shutdown(
-                        reason='Evaluation compelte'))
-                ]
-            )
-        ),
+        Node(
+            package="perception",
+            executable="bev_track",
+            name="bev_track",
+            output="screen",
+            parameters=[
+                {
+                    "camera_name": bev_camera_name,
+                    "debug": debug,
+                    "fps": fps,
+                    "side_length": side_length,
+                    "debug_dir": debug_dir,
+                }
+                
+            ],
+            
+        )
     ]
 
 
@@ -172,10 +169,18 @@ def generate_launch_description():
         name="stereo", description="stereo camera or not", default_value="false"
     )
 
+    fps_arg = DeclareLaunchArgument(
+        name="fps", description="frames per second", default_value="60"
+    )
+
+    side_length_arg = DeclareLaunchArgument(
+        name="side_length", description="side length of the ArUco marker", default_value="0.15"
+    )
+
     debug_arg = DeclareLaunchArgument(
         name="debug", description="debug mode", default_value="false"
     )
-
+    
     eval_time_arg = DeclareLaunchArgument(
         name="eval_time", description="evaluation time", default_value="10.0"
     )
@@ -189,6 +194,8 @@ def generate_launch_description():
             name_arg,
             stereo_arg,
             camera_name_arg,
+            fps_arg,
+            side_length_arg,
             debug_arg,
             eval_time_arg,
             stereo_camera_name_arg,

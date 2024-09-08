@@ -31,17 +31,15 @@ class BevTracker(Node):
     super().__init__('bev_tracker')
 
     curr_time = datetime.now().strftime('%y_%m_%d_%H:%M:%S')
-    self.DEBUG_DIR = f"perception_debug/{curr_time}/bev"
+    fallback_debug_dir = f"perception_debug/{curr_time}/bev"
 
+    self.DEBUG_DIR = self.declare_parameter('debug_dir', fallback_debug_dir).get_parameter_value().string_value
     self.camera_name = self.declare_parameter('camera_name', "zed").get_parameter_value().string_value
     self.node_name = self.declare_parameter('node_name', "bev").get_parameter_value().string_value
     self.debug = self.declare_parameter('debug', False).get_parameter_value().bool_value
     self.fps = self.declare_parameter('fps', 60).get_parameter_value().integer_value
     self.side_length = self.declare_parameter('side_length', 0.15).get_parameter_value().double_value
 
-    if self.debug == True:
-      os.makedirs(f"{self.DEBUG_DIR}", exist_ok=True)
-      
     self.right_camera_info_sub = self.create_subscription(
       CameraInfo, 
       f'{self.camera_name}/{self.node_name}/right/camera_info', 

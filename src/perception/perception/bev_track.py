@@ -103,6 +103,7 @@ class BevTracker(Node):
     self.reentrant_callback_group = ReentrantCallbackGroup()
     self.previous_capture_time = 0
     self.image_queue = deque()
+    
     self.capture_timer = self.create_timer(1e-9, self.capture_callback_scuffed)
 
     # self.capture_timer = self.create_timer(1 / (self.fps), self.capture_callback)
@@ -121,17 +122,17 @@ class BevTracker(Node):
       # Grab an image, a RuntimeParameters object must be given to grab()
       if self.zed.grab(self.runtime_parameters) == sl.ERROR_CODE.SUCCESS:
           # A new image is available if grab() returns SUCCESS
-          self.zed.retrieve_image(image, sl.VIEW.LEFT)
+          self.zed.retrieve_image(image, sl.VIEW.RIGHT)
           timestamp = self.zed.get_timestamp(sl.TIME_REFERENCE.CURRENT)  # Get the timestamp at the time the image was captured
           current_time = timestamp.get_nanoseconds() / 1e9
           if current_time - self.previous_capture_time > 0.02:
             print(f"Current time: {current_time}, Time between two frames: {current_time - self.previous_capture_time}")
 
           self.previous_capture_time = current_time
-          self.image_queue.append((current_time, self.previous_capture_time, image.numpy()))
+          self.image_queue.append((current_time, self.previous_capture_time, np.copy(image.numpy())))
           # cv2.imwrite(f"{self.DEBUG_DIR}/bev/{timestamp.get_milliseconds()}.jpg", image.numpy())
   
-  def capture_callback_scuffed(self):
+  def capture_callback(self):
     """
     Capture images from the Zed camera and place them in a queue (Zed SDK version)
     """

@@ -67,6 +67,7 @@ def spawn_func(context, *args, **kwargs):
         "enable_infra1": False,
         "enable_infra2": False,
         "rgb_camera.enable_auto_exposure": False,
+        "rgb_camera.color_format": "BGR8",
         "rgb_camera.exposure": 166, # 166 is the default value
       }
     ],
@@ -105,9 +106,9 @@ def spawn_func(context, *args, **kwargs):
   )
 
   return [
-    # hardware_bringup,
-    realsense_node,
-    state_estimation_node,
+    hardware_bringup,
+    # realsense_node,
+    # state_estimation_node,
     localize_node,
   ]
 

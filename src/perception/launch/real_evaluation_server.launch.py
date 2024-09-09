@@ -111,8 +111,8 @@ def spawn_func(context, *args, **kwargs):
 
     return [
         bev_track_node,
-        state_estimation_node,
-        localize_node,
+        state_estimation_node, # This can be offloaded to the ego launch file
+        localize_node, # This can be offloaded to the ego launch file
         TimerAction(period=3.0, actions=[trajectory_node]), # trajectory should start publishing after the cameras have initialized
         RegisterEventHandler(
             OnProcessExit(
@@ -126,8 +126,8 @@ def spawn_func(context, *args, **kwargs):
             )
         ),
     ]
-def generate_launch_description():
 
+def generate_launch_description():
     world_arg = DeclareLaunchArgument(name="world", description="name of world", default_value="empty")
 
     agent_name_arg = DeclareLaunchArgument(name="name", description="name of agent vehicle", default_value="f1tenth")

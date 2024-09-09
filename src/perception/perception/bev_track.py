@@ -194,6 +194,15 @@ class BevTracker(Node):
         #     print('tvec', tvec)
         #     print('distance', sqrt(np.sum((tvec)**2)))
     return arucos
+  
+  def destroy_node(self):
+    self.zed.close()
+
+    # write the measurements to a file
+    with open(f"{self.DEBUG_DIR}/measurements.txt", "w") as f:
+      for time, arucos in self.measurements.items():
+        f.write(f"{time}: {arucos}\n")
+    super().destroy_node()
 
   def image_callback(self, selected_camera: str, data: Image):
     """

@@ -12,7 +12,7 @@ import numpy as np
 from math import sqrt
 
 import perception.util.ground_truth as GroundTruth
-from perception.util.conversion import get_time_from_header, get_quaternion_from_rotation_matrix
+from perception.util.conversion import get_time_from_header, get_quaternion_from_rotation_matrix, get_time_from_rosclock
 
 class CarLocalizer(Node):
   """
@@ -106,14 +106,19 @@ class CarLocalizer(Node):
     # Used to convert between ROS and OpenCV images
     self.bridge = CvBridge()
 
+    self.previous_image_time = get_time_from_rosclock(self.get_clock())
+    self.previous_pose_time = self.previous_image_time
+
   def destroy_node(self):
-    self.video_output.release()
+    if self.debug == True:
+      self.video_output.release()
     super().destroy_node()
 
   def pose_pub_callback(self, image: Image):
     """
     Publish the estimated pose of the opponent
     """
+    current_time = get_time_from_header(image.header)
     rvec, tvec = self.locate_aruco(image)
 
     if rvec is not None and tvec is not None:
@@ -126,8 +131,12 @@ class CarLocalizer(Node):
       msg.header = image.header
       msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = tvec[0][0], tvec[1][0], tvec[2][0]
       msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w = quaternion
-
+      
       self.opp_estimated_pose_pub.publish(msg)
+      
+    if current_time - self.previous_pose_time > 0.034:
+      print(f"Current time: {current_time}, Time between two frames: {current_time - self.previous_pose_time}")
+    self.previous_pose_time = current_time
 
   def camera_info_callback(self, data: CameraInfo):
     self.color_intrinsics = data.k.reshape(3, 3)
@@ -169,7 +178,8 @@ class CarLocalizer(Node):
     # Convert ROS Image message to OpenCV image
     current_frame = self.bridge.imgmsg_to_cv2(data)
     current_frame = cv2.cvtColor(current_frame, cv2.COLOR_BGR2RGB)
-    
+    current_time = get_time_from_header(data.header)
+
     marker_corners, marker_ids, _ = cv2.aruco.detectMarkers(
       image = current_frame,
       dictionary = self.aruco_dictionary)
@@ -182,8 +192,13 @@ class CarLocalizer(Node):
       rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(marker_corners, self.side_length, self.color_intrinsics, self.dist_coeffs)
 
       for i in range(len(rvecs)):
-        frame_copy = cv2.aruco.drawAxis(frame_copy, self.color_intrinsics, self.dist_coeffs, rvecs[i], tvecs[i], 0.1)
-      
+        frame_copy = cv2.drawFrameAxes(frame_copy, self.color_intrinsics, self.dist_coeffs, rvecs[i], tvecs[i], 0.1)
+        # add text to the image that shows the distance using tvec
+        cv2.putText(frame_copy, f"Distance: {sqrt(np.sum((tvecs[i])**2))}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+        #add text to show the time between two frames
+        cv2.putText(frame_copy, f"Time: {current_time - self.previous_image_time}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+    
+    self.previous_image_time = current_time
     # Write image with detected pose to video
     self.video_output.write(frame_copy)
 
@@ -192,7 +207,6 @@ class CarLocalizer(Node):
 
 
 def main(args=None):
-
   rclpy.init(args=args)
   
   car_localizer = CarLocalizer()

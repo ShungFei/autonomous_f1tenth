@@ -30,9 +30,9 @@ class BevTracker(Node):
     super().__init__('bev_tracker')
 
     curr_time = datetime.now().strftime('%y_%m_%d_%H:%M:%S')
-    fallback_debug_dir = f"perception_debug/{curr_time}/bev"
+    fallback_debug_dir = f"perception_debug/{curr_time}"
 
-    self.DEBUG_DIR = self.declare_parameter('debug_dir', fallback_debug_dir).get_parameter_value().string_value
+    self.DEBUG_DIR = f'{self.declare_parameter('debug_dir', fallback_debug_dir).get_parameter_value().string_value}/bev'
     self.camera_name = self.declare_parameter('camera_name', "zed").get_parameter_value().string_value
     self.node_name = self.declare_parameter('node_name', "bev").get_parameter_value().string_value
     self.debug = self.declare_parameter('debug', False).get_parameter_value().bool_value
@@ -118,7 +118,7 @@ class BevTracker(Node):
       image_np = image.numpy()
 
       arucos = self.locate_arucos(image_np)
-      cv2.imwrite(f"{self.DEBUG_DIR}/{curr_time}.jpg", image_np)
+      cv2.imwrite(f"{self.DEBUG_DIR}/bev/{curr_time}.jpg", image_np)
       # self.image_queue.put((curr_time, self.prev_time_capture, image_np))
 
       print(curr_time - self.prev_time_capture)
@@ -199,7 +199,7 @@ class BevTracker(Node):
     self.zed.close()
 
     # write the measurements to a file
-    with open(f"{self.DEBUG_DIR}/measurements.txt", "w") as f:
+    with open(f"{self.DEBUG_DIR}/bev/measurements.txt", "w") as f:
       for time, arucos in self.measurements.items():
         f.write(f"{time}: {arucos}\n")
     super().destroy_node()

@@ -7,6 +7,9 @@ from cv_bridge import CvBridge
 from message_filters import Subscriber, ApproximateTimeSynchronizer
 from datetime import datetime
 import cv2
+import pyrealsense2 as rs
+from queue import Queue
+
 import os
 import numpy as np
 from math import sqrt
@@ -33,6 +36,8 @@ class CarLocalizer(Node):
     self.SELECTED_CAMERA = "color"
     self.SELECTED_DEPTH_CAMERA = "depth"
 
+    os.makedirs(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}", exist_ok=True)
+
     self.agent_name = self.declare_parameter('agent_name', "f1tenth").get_parameter_value().string_value
     self.camera_name = self.declare_parameter('camera_name', "d435").get_parameter_value().string_value
 
@@ -43,7 +48,6 @@ class CarLocalizer(Node):
     self.get_logger().info(f"Subscribing to {self.agent_name}")
 
     if self.debug == True:
-      os.makedirs(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}", exist_ok=True)
       self.video_output = cv2.VideoWriter(f"{self.DEBUG_DIR}/detection.avi", cv2.VideoWriter_fourcc(*'XVID'), 20.0, (1920, 1080))
 
       self.color_image_sub = self.create_subscription(
@@ -84,9 +88,8 @@ class CarLocalizer(Node):
         0.1,
     )
     self.eval_sub.registerCallback(self.pose_pub_callback)
-
     self.color_intrinsics = None
-    self.dist_coeffs = None
+    self.color_dist_coeffs = None
     self.aruco_dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_250)
 
     # Define the side length of the ArUco marker
@@ -109,18 +112,73 @@ class CarLocalizer(Node):
     self.previous_image_time = get_time_from_rosclock(self.get_clock())
     self.previous_pose_time = self.previous_image_time
 
+    ## === USING THE PYREALSENSE2 API INSTEAD OF ROS2 WRAPPER === ##
+
+    # Configure depth and color streams
+    self.pipeline = rs.pipeline()
+    self.config = rs.config()
+
+    # Get device product line for setting a supporting resolution
+    pipeline_wrapper = rs.pipeline_wrapper(self.pipeline)
+    pipeline_profile = self.config.resolve(pipeline_wrapper)
+    device = pipeline_profile.get_device()
+
+    found_rgb = False
+    for s in device.sensors:
+        if s.get_info(rs.camera_info.name) == 'RGB Camera':
+            found_rgb = True
+            break
+    if not found_rgb:
+        print("The demo requires Depth camera with Color sensor")
+        exit(0)
+
+    self.config.enable_stream(rs.stream.color, 1920, 1080, rs.format.bgr8, 30)
+
+    # Start streaming
+    cfg = self.pipeline.start(self.config)
+    profile = cfg.get_stream(rs.stream.color)
+    color_intr = profile.as_video_stream_profile().get_intrinsics() 
+
+    self.color_intrinsics = np.array([
+        [color_intr.fx, 0, color_intr.ppx],
+        [0, color_intr.fy, color_intr.ppy],
+        [0, 0, 1]
+    ])
+    self.color_dist_coeffs = np.array(color_intr.coeffs)
+    self.create_timer(1/30, self.rs_pose_pub_callback)
+
   def destroy_node(self):
     if self.debug == True:
       self.video_output.release()
     super().destroy_node()
 
+  def rs_pose_pub_callback(self):
+    """
+    Publish the estimated pose of the opponent (PyRealsense2 Version)
+
+    This currently just dumps the images to a folder (doesn't actually publish pose)
+    """
+    frames = self.pipeline.wait_for_frames()
+    color_frame = frames.get_color_frame()
+    image_np = np.asanyarray(color_frame.get_data())
+    current_time = color_frame.get_timestamp() / 1000
+
+    # rvec, tvec = self.locate_aruco(image_np)
+    cv2.imwrite(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/{current_time}.jpg", image_np)
+
+    if current_time - self.previous_pose_time > 0.034:
+      print(f"Current time: {current_time}, Time between two frames: {current_time - self.previous_pose_time}")
+
+    self.previous_pose_time = current_time
+
   def pose_pub_callback(self, image: Image):
     """
-    Publish the estimated pose of the opponent
+    Publish the estimated pose of the opponent (ROS2 Version)
     """
     current_time = get_time_from_header(image.header)
-    rvec, tvec = self.locate_aruco(image)
-
+    image_np = self.bridge.imgmsg_to_cv2(image, desired_encoding="bgr8")
+    rvec, tvec = self.locate_aruco(image_np)
+    
     if rvec is not None and tvec is not None:
       rot_matrix, _ = cv2.Rodrigues(rvec)
       quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
@@ -140,21 +198,22 @@ class CarLocalizer(Node):
 
   def camera_info_callback(self, data: CameraInfo):
     self.color_intrinsics = data.k.reshape(3, 3)
-    self.dist_coeffs = np.array([data.d])
+    self.color_dist_coeffs = np.array([data.d])
     
     # Only need the camera parameters once (assuming no change)
     self.destroy_subscription(self.color_camera_info_sub)
   
-  def locate_aruco(self, image: Image):
-    current_frame = self.bridge.imgmsg_to_cv2(image)
-    current_frame = cv2.cvtColor(current_frame, cv2.COLOR_BGR2RGB)
+  def locate_aruco(self, image: np.ndarray, bgr: bool=True):
+    # probably unnecessary
+    # if bgr:
+    #   image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
     # Add subpixel refinement to marker detector
     detector_params = cv2.aruco.DetectorParameters()
     detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
 
     marker_corners, marker_ids, _ = cv2.aruco.detectMarkers(
-      image = current_frame,
+      image = image,
       parameters = detector_params,
       dictionary = self.aruco_dictionary)
     if len(marker_corners) > 0:
@@ -189,10 +248,10 @@ class CarLocalizer(Node):
     if len(marker_corners) > 0:
       frame_copy = cv2.aruco.drawDetectedMarkers(frame_copy, marker_corners, marker_ids)
 
-      rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(marker_corners, self.side_length, self.color_intrinsics, self.dist_coeffs)
+      rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(marker_corners, self.side_length, self.color_intrinsics, self.color_dist_coeffs)
 
       for i in range(len(rvecs)):
-        frame_copy = cv2.drawFrameAxes(frame_copy, self.color_intrinsics, self.dist_coeffs, rvecs[i], tvecs[i], 0.1)
+        frame_copy = cv2.drawFrameAxes(frame_copy, self.color_intrinsics, self.color_dist_coeffs, rvecs[i], tvecs[i], 0.1)
         # add text to the image that shows the distance using tvec
         cv2.putText(frame_copy, f"Distance: {sqrt(np.sum((tvecs[i])**2))}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
         #add text to show the time between two frames

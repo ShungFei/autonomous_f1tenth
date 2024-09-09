@@ -111,8 +111,8 @@ def spawn_func(context, *args, **kwargs):
 
     return [
         bev_track_node,
-        state_estimation_node, # This can be offloaded to the ego launch file
-        localize_node, # This can be offloaded to the ego launch file
+        # state_estimation_node, # This can be offloaded to the ego launch file
+        # localize_node, # This can be offloaded to the ego launch file
         TimerAction(period=3.0, actions=[trajectory_node]), # trajectory should start publishing after the cameras have initialized
         RegisterEventHandler(
             OnProcessExit(

@@ -5,7 +5,7 @@ from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import Vector3Stamped, PoseStamped
 from cv_bridge import CvBridge
 from message_filters import Subscriber, ApproximateTimeSynchronizer
-from queue import Queue
+from collections import deque
 
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -32,7 +32,10 @@ class BevTracker(Node):
     curr_time = datetime.now().strftime('%y_%m_%d_%H:%M:%S')
     fallback_debug_dir = f"perception_debug/{curr_time}"
 
-    self.DEBUG_DIR = f'{self.declare_parameter('debug_dir', fallback_debug_dir).get_parameter_value().string_value}/bev'
+    self.DEBUG_DIR = self.declare_parameter('debug_dir', fallback_debug_dir).get_parameter_value().string_value
+
+    os.makedirs(f"{self.DEBUG_DIR}/bev", exist_ok=True)
+
     self.camera_name = self.declare_parameter('camera_name', "zed").get_parameter_value().string_value
     self.node_name = self.declare_parameter('node_name', "bev").get_parameter_value().string_value
     self.debug = self.declare_parameter('debug', False).get_parameter_value().bool_value
@@ -98,29 +101,52 @@ class BevTracker(Node):
     self.right_dist_coeffs = np.array(right_camera_info_sl.disto)
 
     self.reentrant_callback_group = ReentrantCallbackGroup()
-    self.capture_timer = self.create_timer(1 / (self.fps - 10), self.capture_callback)
+    self.previous_capture_time = 0
+    self.image_queue = deque()
+    self.capture_timer = self.create_timer(1e-9, self.capture_callback_scuffed)
+
+    # self.capture_timer = self.create_timer(1 / (self.fps), self.capture_callback)
     
     # self.process_image_timer = self.create_timer(1 / (self.fps - 10), self.process_image_callback, 
     #                                              callback_group=self.reentrant_callback_group)
-    self.image_queue = Queue()
+  def capture_callback_scuffed(self):
+    """
+    Since the ZED Python API does not like us grabbing the frames in a ROS2 callback, we create a single time
+    callback to execute a while loop
+    """
+    self.capture_timer.destroy()
 
-  def capture_callback(self):
+    image = sl.Mat()
+    while True:
+      # Grab an image, a RuntimeParameters object must be given to grab()
+      if self.zed.grab(self.runtime_parameters) == sl.ERROR_CODE.SUCCESS:
+          # A new image is available if grab() returns SUCCESS
+          self.zed.retrieve_image(image, sl.VIEW.LEFT)
+          timestamp = self.zed.get_timestamp(sl.TIME_REFERENCE.CURRENT)  # Get the timestamp at the time the image was captured
+          current_time = timestamp.get_nanoseconds() / 1e9
+          if current_time - self.previous_capture_time > 0.02:
+            print(f"Current time: {current_time}, Time between two frames: {current_time - self.previous_capture_time}")
+
+          self.previous_capture_time = current_time
+          self.image_queue.append((current_time, self.previous_capture_time, image.numpy()))
+          # cv2.imwrite(f"{self.DEBUG_DIR}/bev/{timestamp.get_milliseconds()}.jpg", image.numpy())
+  
+  def capture_callback_scuffed(self):
     """
     Capture images from the Zed camera and place them in a queue (Zed SDK version)
     """
     image = sl.Mat()
     if self.zed.grab(self.runtime_parameters) == sl.ERROR_CODE.SUCCESS:
       # A new image is available if grab() returns SUCCESS
-      self.zed.retrieve_image(image, sl.VIEW.RIGHT)
+      self.zed.retrieve_image(image, sl.VIEW.RIGHT_UNRECTIFIED)
       timestamp = self.zed.get_timestamp(sl.TIME_REFERENCE.CURRENT)  # Get the timestamp at the time the image was captured
       
       curr_time = timestamp.get_milliseconds()
       image_np = image.numpy()
 
-      arucos = self.locate_arucos(image_np)
-      cv2.imwrite(f"{self.DEBUG_DIR}/bev/{curr_time}.jpg", image_np)
-      # self.image_queue.put((curr_time, self.prev_time_capture, image_np))
-
+      # arucos = self.locate_arucos(image_np)
+      # cv2.imwrite(f"{self.DEBUG_DIR}/bev/{curr_time}.jpg", image_np)
+      self.image_queue.append((curr_time, self.prev_time_capture, image_np))
       print(curr_time - self.prev_time_capture)
       # print(arucos)
 
@@ -130,8 +156,8 @@ class BevTracker(Node):
     """
     Process images from the Zed camera queue (Zed SDK version)
     """
-    if not self.image_queue.empty():
-      curr_time, prev_time_capture, image_np = self.image_queue.get()
+    if len(self.image_queue) > 0:
+      curr_time, prev_time_capture, image_np = self.image_queue.popleft()
       arucos = self.locate_arucos(image_np)
 
       self.measurements[curr_time] = arucos
@@ -202,6 +228,12 @@ class BevTracker(Node):
     with open(f"{self.DEBUG_DIR}/bev/measurements.txt", "w") as f:
       for time, arucos in self.measurements.items():
         f.write(f"{time}: {arucos}\n")
+
+    # write all the images in the queue to a file
+    while len(self.image_queue) > 0:
+      current_time, _, image_np = self.image_queue.popleft()
+      cv2.imwrite(f"{self.DEBUG_DIR}/bev/{current_time}.jpg", image_np)
+
     super().destroy_node()
 
   def image_callback(self, selected_camera: str, data: Image):
@@ -234,21 +266,17 @@ class BevTracker(Node):
 
 
 def main(args=None):
-
   rclpy.init(args=args)
   
   bev_tracker = BevTracker()
   
-  executor = MultiThreadedExecutor()
-  executor.add_node(bev_tracker)
-  
   try:
-      executor.spin()
+    rclpy.spin(bev_tracker)
   except KeyboardInterrupt:
     pass
-
-  bev_tracker.destroy_node()
-  rclpy.shutdown()
+  finally:
+    bev_tracker.destroy_node()
+    rclpy.shutdown()
   
 if __name__ == '__main__':
   main()

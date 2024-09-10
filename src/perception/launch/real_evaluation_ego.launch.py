@@ -82,6 +82,7 @@ def spawn_func(context, *args, **kwargs):
     parameters=[
       {
         "opponent_name": opponent_name,
+        "debug": debug,
         "debug_dir": debug_dir,
       }
     ],

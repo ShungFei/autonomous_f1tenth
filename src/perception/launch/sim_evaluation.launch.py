@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 
 from ament_index_python import get_package_share_directory
@@ -56,7 +57,7 @@ def spawn_model_from_xacro(xacro_file, name, x, y, z, R, P, Y, **kwargs):
         output='screen'
     )
 
-def stereo_nodes(name, camera_name, opponent_name, debug=False):
+def stereo_nodes(name, camera_name, opponent_name, debug_dir, debug=False):
     return [
         Node(
             package="perception",
@@ -69,6 +70,7 @@ def stereo_nodes(name, camera_name, opponent_name, debug=False):
                     "camera_name": camera_name,
                     "opponent_name": opponent_name,
                     "debug": debug,
+                    "debug_dir": f"perception_debug/{name}",
                 }
             ],
             emulate_tty=True,
@@ -87,7 +89,7 @@ def stereo_nodes(name, camera_name, opponent_name, debug=False):
         ),
     ]
 
-def monocular_nodes(name, camera_name, opponent_name, eval_time, debug=False):
+def monocular_nodes(name, camera_name, opponent_name, eval_time, debug_dir, debug=False):
     return [
         Node(
             package="perception",
@@ -100,6 +102,7 @@ def monocular_nodes(name, camera_name, opponent_name, eval_time, debug=False):
                     "camera_name": camera_name,
                     "opponent_name": opponent_name,
                     "debug": debug,
+                    "debug_dir": debug_dir,
                 }
             ],
             emulate_tty=True,
@@ -156,6 +159,12 @@ def spawn_func(context, *args, **kwargs):
     R = LaunchConfiguration("R").perform(context)
     P = LaunchConfiguration("P").perform(context)
     Y = LaunchConfiguration("Y").perform(context)
+
+    current_time = datetime.now().strftime('%y_%m_%d_%H:%M:%S')
+    debug_dir = f"perception_debug/{current_time}"
+    if debug:
+        if not os.path.exists(debug_dir):
+            os.makedirs(debug_dir)
     
     trajectory_node = Node(
         package="perception",
@@ -200,7 +209,10 @@ def spawn_func(context, *args, **kwargs):
             output="screen",
             parameters=[
                 {
+                    "debug": debug,
+                    "debug_dir": debug_dir,
                     "opponent_name": opponent_name,
+
                 }
             ],
             emulate_tty=True,
@@ -260,7 +272,7 @@ def spawn_func(context, *args, **kwargs):
                 ]
             )
         ),
-        *(monocular_nodes(name, camera_name, opponent_name, eval_time, debug=debug) if is_stereo == "false" else stereo_nodes(name, stereo_camera_name, opponent_name, debug=debug)),
+        *(monocular_nodes(name, camera_name, opponent_name, eval_time, debug_dir, debug=debug) if is_stereo == "false" else stereo_nodes(name, stereo_camera_name, opponent_name, debug_dir, debug=debug)),
     ]
 
 

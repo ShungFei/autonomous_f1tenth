@@ -20,12 +20,11 @@ class StateEstimator(Node):
     curr_time = datetime.now().strftime('%y_%m_%d_%H:%M:%S')
     fallback_debug_dir = f"perception_debug/{curr_time}"
     self.DEBUG_DIR = self.declare_parameter('debug_dir', fallback_debug_dir).get_parameter_value().string_value
-
-
-    # self.agent_name = self.declare_parameter('agent_name', "f1tenth").get_parameter_value().string_value
-    # self.camera_name = self.declare_parameter('camera_name', "d435").get_parameter_value().string_value
     self.opponent_name = self.declare_parameter('opponent_name', "opponent").get_parameter_value().string_value
-    # self.debug = self.declare_parameter('debug', False).get_parameter_value().bool_value
+    self.debug = self.declare_parameter('debug', False).get_parameter_value().bool_value
+
+    if self.debug:
+      self.state_estimate_list : list[StateEstimateStamped] = []
 
     self.opp_estimated_pose_sub = self.create_subscription(
       PoseStamped,
@@ -60,7 +59,7 @@ class StateEstimator(Node):
     self.kf.x[:3] = pose[:3]
     self.kf.x[9:12] = pose[3:6]
     # State covariance
-    self.kf.P = np.diag([1, 1, 1, 10, 10, 10, 25, 25, 25, 1, 1, 1, 10, 10, 10, 25, 25, 25])
+    self.kf.P = np.diag([1, 1, 1, 2, 2, 2, 3, 3, 3, 1, 1, 1, 2, 2, 2, 3, 3, 3])
     # Process noise
     q = Q_discrete_white_noise(dim=3, dt=dt, var=0.05)
 
@@ -123,6 +122,9 @@ class StateEstimator(Node):
     msg.header.stamp = data.header.stamp
 
     state_estimate = self.kf.x
+    if self.debug:
+      self.state_estimate_list.append(state_estimate)
+
     msg.position.x, msg.position.y, msg.position.z = state_estimate[:3]
     msg.linear_velocity.x, msg.linear_velocity.y, msg.linear_velocity.z = state_estimate[3:6]
     msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z = state_estimate[6:9]
@@ -132,10 +134,42 @@ class StateEstimator(Node):
     
     self.state_estimate_pub.publish(msg)
 
-def velocity_rolling_window_regression(data, window_size):
-  """
-  Estimate position and velocity of the opponent using rolling window regression on the given pose data
-  """
+  def velocity_rolling_window_regression(data, window_size):
+    """
+    Estimate position and velocity of the opponent using rolling window regression on the given pose data
+    """
+    pass
+
+  def destroy_node(self):
+    if self.debug:
+      table = np.array(
+        [
+          get_time_from_header(state.header),
+          state.position.x,
+          state.position.y,
+          state.position.z,
+          state.linear_velocity.x,
+          state.linear_velocity.y,
+          state.linear_velocity.z,
+          state.linear_acceleration.x,
+          state.linear_acceleration.y,
+          state.linear_acceleration.z,
+          state.orientation.x,
+          state.orientation.y,
+          state.orientation.z,
+          state.angular_velocity.x,
+          state.angular_velocity.y,
+          state.angular_velocity.z,
+          state.angular_acceleration.x,
+          state.angular_acceleration.y,
+          state.angular_acceleration.z,
+        ]
+        for state in self.state_estimate_list
+      )
+
+      np.savetxt(f"{self.DEBUG_DIR}/state_estimates.csv", table, delimiter=",", header="time,position_x,position_y,position_z,linear_velocity_x,linear_velocity_y,linear_velocity_z,linear_acceleration_x,linear_acceleration_y,linear_acceleration_z,orientation_x,orientation_y,orientation_z,angular_velocity_x,angular_velocity_y,angular_velocity_z,angular_acceleration_x,angular_acceleration_y,angular_acceleration_z", comments="")
+
+    super().destroy_node()
   
 
 def main(args=None):
@@ -144,7 +178,10 @@ def main(args=None):
   
   state_estimator = StateEstimator()
 
-  rclpy.spin(state_estimator)
+  try:
+    rclpy.spin(state_estimator)
+  except KeyboardInterrupt:
+    pass
 
   state_estimator.destroy_node()
   

@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 import rclpy
 from rclpy.node import Node
@@ -47,6 +48,10 @@ class Trajectory(Node):
 
     self.END_BUFFER_TIME = 1.0
     
+    curr_time = datetime.now().strftime('%y_%m_%d_%H:%M:%S')
+    fallback_debug_dir = f"perception_debug/{curr_time}"
+    self.DEBUG_DIR = self.declare_parameter('debug_dir', fallback_debug_dir).get_parameter_value().string_value
+
     self.agent_name = self.declare_parameter('agent_name', "f1tenth").get_parameter_value().string_value
     self.camera_name = self.declare_parameter('camera_name', "d435").get_parameter_value().string_value
     self.opponent_name = self.declare_parameter('opponent_name', "opponent").get_parameter_value().string_value 
@@ -54,6 +59,7 @@ class Trajectory(Node):
     self.is_stereo = self.declare_parameter('is_stereo', False).get_parameter_value().bool_value
     self.eval_time = self.declare_parameter('eval_time', 10.0).get_parameter_value().double_value
     self.wheel_base = self.declare_parameter('wheel_base', 0.325).get_parameter_value().double_value
+    self.debug = self.declare_parameter('debug', False).get_parameter_value().bool_value
 
     self.start_agent_vel_pub = False
     self.start_opp_vel_pub = False
@@ -271,6 +277,12 @@ class Trajectory(Node):
     msg.drive.steering_angle = self.twist_to_ackermann(angular, linear, self.wheel_base)
 
     return msg
+
+  def destroy_node(self):
+    if self.debug:
+      with open(f"{self.DEBUG_DIR}/start_time.txt", "w") as f:
+        f.write(str(self.start_time))
+    super().destroy_node()
   
 def main(args=None):
   rclpy.init(args=args)

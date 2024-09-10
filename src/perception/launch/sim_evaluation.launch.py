@@ -179,6 +179,8 @@ def spawn_func(context, *args, **kwargs):
                 "is_sim": True,
                 "is_stereo": is_stereo == "true",
                 "eval_time": eval_time,
+                "debug": debug,
+                "debug_dir": debug_dir,
             }
         ],
         emulate_tty=True,

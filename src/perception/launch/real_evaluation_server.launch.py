@@ -56,6 +56,8 @@ def spawn_func(context, *args, **kwargs):
                 "is_sim": False,
                 "is_stereo": False,
                 "eval_time": eval_time,
+                "debug": debug,
+                "debug_dir": debug_dir,
             }
         ],
         emulate_tty=True,

@@ -222,16 +222,14 @@ class Trajectory(Node):
     time = get_time_from_rosclock(self.get_clock()) - self.start_time
 
     # Stop the vehicles after the evaluation time has passed
-    print(time, self.eval_time, self.END_BUFFER_TIME)
-
-    if time >= self.eval_time + self.END_BUFFER_TIME:
+    if time >= self.eval_time:
       if self.is_sim:
         self.agent_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
         self.opp_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
       else:
         self.agent_ackermann_pub.publish(self.create_ackermann_msg(0.0, 0.0))
         self.opp_ackermann_pub.publish(self.create_ackermann_msg(0.0, 0.0))
-      if time >= self.start_time + self.eval_time + self.END_BUFFER_TIME:
+      if time >= self.eval_time + self.END_BUFFER_TIME:
         raise SystemExit
       else:
         return

@@ -9,6 +9,7 @@ from datetime import datetime
 import cv2
 import pyrealsense2 as rs
 from queue import Queue
+from perception.util.aruco import locate_arucos
 
 import os
 import numpy as np
@@ -44,6 +45,7 @@ class CarLocalizer(Node):
     # Currently unused
     self.opponent_name = self.declare_parameter('opponent_name', "opponent").get_parameter_value().string_value
     self.debug = self.declare_parameter('debug', False).get_parameter_value().bool_value
+    self.opp_back_marker_id = self.declare_parameter('opp_back_marker_id', -1).get_parameter_value().integer_value
 
     self.get_logger().info(f"Subscribing to {self.agent_name}")
 
@@ -150,6 +152,13 @@ class CarLocalizer(Node):
   def destroy_node(self):
     if self.debug == True:
       self.video_output.release()
+
+    self.pipeline.stop()
+
+    # Save camera parameters to debug directory
+    np.savetxt(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/intrinsics.txt", self.color_intrinsics)
+    np.savetxt(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/dist_coeffs.txt", self.color_dist_coeffs)
+
     super().destroy_node()
 
   def rs_pose_pub_callback(self):
@@ -163,7 +172,7 @@ class CarLocalizer(Node):
     image_np = np.asanyarray(color_frame.get_data())
     current_time = color_frame.get_timestamp() / 1000
 
-    # rvec, tvec = self.locate_aruco(image_np)
+    # arucos = locate_arucos(image_np, self.aruco_dictionary, self.marker_obj_points, self.color_intrinsics, self.color_dist_coeffs)
     cv2.imwrite(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/{current_time}.jpg", image_np)
 
     if current_time - self.previous_pose_time > 0.034:
@@ -177,20 +186,23 @@ class CarLocalizer(Node):
     """
     current_time = get_time_from_header(image.header)
     image_np = self.bridge.imgmsg_to_cv2(image, desired_encoding="bgr8")
-    rvec, tvec = self.locate_aruco(image_np)
+    arucos = locate_arucos(image_np, self.aruco_dictionary, self.marker_obj_points, self.color_intrinsics, self.color_dist_coeffs)
+
+    if len(arucos) > 0:
+      if self.opp_back_marker_id in arucos:
+        rvec, tvec = arucos[self.opp_back_marker_id]
     
-    if rvec is not None and tvec is not None:
-      rot_matrix, _ = cv2.Rodrigues(rvec)
-      quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
+        rot_matrix, _ = cv2.Rodrigues(rvec)
+        quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
 
-      # Publish the estimated pose
-      msg = PoseStamped()
+        # Publish the estimated pose
+        msg = PoseStamped()
 
-      msg.header = image.header
-      msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = tvec[0][0], tvec[1][0], tvec[2][0]
-      msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w = quaternion
-      
-      self.opp_estimated_pose_pub.publish(msg)
+        msg.header = image.header
+        msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = tvec[0][0], tvec[1][0], tvec[2][0]
+        msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w = quaternion
+        
+        self.opp_estimated_pose_pub.publish(msg)
       
     if current_time - self.previous_pose_time > 0.034:
       print(f"Current time: {current_time}, Time between two frames: {current_time - self.previous_pose_time}")

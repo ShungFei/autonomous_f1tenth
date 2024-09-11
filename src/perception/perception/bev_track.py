@@ -18,6 +18,7 @@ import pyzed.sl as sl
 
 import perception.util.ground_truth as GroundTruth
 from perception.util.conversion import get_time_from_header, get_time_from_rosclock, get_quaternion_from_rotation_matrix
+from perception.util.aruco import locate_arucos
 
 class BevTracker(Node):
   """
@@ -92,13 +93,25 @@ class BevTracker(Node):
         exit()
 
     self.camera_info = self.zed.get_camera_information()
-    right_camera_info_sl = self.camera_info.camera_configuration.calibration_parameters.right_cam
+    camera_info_raw_sl = self.camera_info.camera_configuration.calibration_parameters_raw
+    right_camera_info_sl = camera_info_raw_sl.right_cam
+    left_camera_info_sl = camera_info_raw_sl.left_cam
+    extrinsics_sl = camera_info_raw_sl.stereo_transform
+
     self.right_intrinsics = np.array([
         [right_camera_info_sl.fx, 0, right_camera_info_sl.cx],
         [0, right_camera_info_sl.fy, right_camera_info_sl.cy],
         [0, 0, 1]
     ])
     self.right_dist_coeffs = np.array(right_camera_info_sl.disto)
+
+    self.left_intrinsics = np.array([
+        [left_camera_info_sl.fx, 0, left_camera_info_sl.cx],
+        [0, left_camera_info_sl.fy, left_camera_info_sl.cy],
+        [0, 0, 1]
+    ])
+    self.left_dist_coeffs = np.array(left_camera_info_sl.disto)
+    self.extrinsics = extrinsics_sl.m
 
     self.reentrant_callback_group = ReentrantCallbackGroup()
     self.previous_capture_time = 0
@@ -117,20 +130,23 @@ class BevTracker(Node):
     """
     self.capture_timer.destroy()
 
-    image = sl.Mat()
+    image_right = sl.Mat()
+    image_left = sl.Mat()
     while True:
       # Grab an image, a RuntimeParameters object must be given to grab()
       if self.zed.grab(self.runtime_parameters) == sl.ERROR_CODE.SUCCESS:
           # A new image is available if grab() returns SUCCESS
-          self.zed.retrieve_image(image, sl.VIEW.RIGHT)
+          self.zed.retrieve_image(image_right, sl.VIEW.RIGHT_UNRECTIFIED)
+          self.zed.retrieve_image(image_left, sl.VIEW.LEFT_UNRECTIFIED)
+
           timestamp = self.zed.get_timestamp(sl.TIME_REFERENCE.CURRENT)  # Get the timestamp at the time the image was captured
           current_time = timestamp.get_nanoseconds() / 1e9
           if current_time - self.previous_capture_time > 0.02:
             print(f"Current time: {current_time}, Time between two frames: {current_time - self.previous_capture_time}")
-
           self.previous_capture_time = current_time
-          self.image_queue.append((current_time, self.previous_capture_time, np.copy(image.numpy())))
-          # cv2.imwrite(f"{self.DEBUG_DIR}/bev/{timestamp.get_milliseconds()}.jpg", image.numpy())
+          self.image_queue.append((current_time, self.previous_capture_time, 
+                                   image_left.numpy(force=True), image_right.numpy(force=True)))
+          # cv2.imwrite(f"{self.DEBUG_DIR}/bev/{timestamp.get_milliseconds()}.jpg", np.copy(image.numpy()))
   
   def capture_callback(self):
     """
@@ -145,7 +161,7 @@ class BevTracker(Node):
       curr_time = timestamp.get_milliseconds()
       image_np = image.numpy()
 
-      # arucos = self.locate_arucos(image_np)
+      # arucos = locate_arucos(image_np, self.aruco_dictionary, self.marker_obj_points, self.right_intrinsics, self.right_dist_coeffs)
       # cv2.imwrite(f"{self.DEBUG_DIR}/bev/{curr_time}.jpg", image_np)
       self.image_queue.append((curr_time, self.prev_time_capture, image_np))
       print(curr_time - self.prev_time_capture)
@@ -159,7 +175,7 @@ class BevTracker(Node):
     """
     if len(self.image_queue) > 0:
       curr_time, prev_time_capture, image_np = self.image_queue.popleft()
-      arucos = self.locate_arucos(image_np)
+      arucos = locate_arucos(image_np, self.aruco_dictionary, self.marker_obj_points, self.right_intrinsics, self.right_dist_coeffs)
 
       self.measurements[curr_time] = arucos
       print(curr_time - prev_time_capture) #curr_time - self.prev_time_process
@@ -173,7 +189,8 @@ class BevTracker(Node):
     """
     curr_time = get_time_from_header(image_msg.header)
     current_frame = self.bridge.imgmsg_to_cv2(image_msg)
-    arucos = self.locate_arucos(current_frame)
+    arucos = locate_arucos(current_frame, self.aruco_dictionary,
+                           self.marker_obj_points, self.right_intrinsics, self.right_dist_coeffs)
 
     print(curr_time)
 
@@ -195,35 +212,11 @@ class BevTracker(Node):
     # Only need the camera parameters once (assuming no change)
     self.destroy_subscription(self.right_camera_info_sub)
   
-  def locate_arucos(self, image: np.ndarray):
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-    # Add subpixel refinement to marker detector
-    detector_params = cv2.aruco.DetectorParameters()
-    detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-    all_marker_corners, all_marker_ids, _ = cv2.aruco.detectMarkers(
-      image = image,
-      parameters = detector_params,
-      dictionary = self.aruco_dictionary)
-    all_marker_ids = all_marker_ids if all_marker_ids is not None else []
-    arucos = {}
-
-    for id, marker in zip(all_marker_ids, all_marker_corners):
-        # tvec contains position of marker in camera frame
-        _, rvec, tvec = cv2.solvePnP(self.marker_obj_points, marker, 
-                            self.right_intrinsics, 0, flags=cv2.SOLVEPNP_IPPE_SQUARE)
-        # print(id, marker, rvec, tvec)
-        arucos[id[0]] = (rvec, tvec)
-        # if self.debug == True:
-        #     print('id', id[0])
-        #     print('corners', marker)
-        #     print('rvec', rvec)
-        #     print('tvec', tvec)
-        #     print('distance', sqrt(np.sum((tvec)**2)))
-    return arucos
-  
   def destroy_node(self):
     self.zed.close()
+
+    os.makedirs(f"{self.DEBUG_DIR}/bev/left", exist_ok=True)
+    os.makedirs(f"{self.DEBUG_DIR}/bev/right", exist_ok=True)
 
     # write the measurements to a file
     with open(f"{self.DEBUG_DIR}/bev/measurements.txt", "w") as f:
@@ -232,8 +225,17 @@ class BevTracker(Node):
 
     # write all the images in the queue to a file
     while len(self.image_queue) > 0:
-      current_time, _, image_np = self.image_queue.popleft()
-      cv2.imwrite(f"{self.DEBUG_DIR}/bev/{current_time}.jpg", image_np)
+      current_time, _, left_image, right_image = self.image_queue.popleft()
+      # cv2.imwrite(f"{self.DEBUG_DIR}/bev/left/{current_time}.jpg", left_image)
+      cv2.imwrite(f"{self.DEBUG_DIR}/bev/right/{current_time}.jpg", right_image)
+
+    # Write the camera intrinsics to a file
+    np.savetxt(f"{self.DEBUG_DIR}/bev/right/intrinsics.txt", self.right_intrinsics)
+    np.savetxt(f"{self.DEBUG_DIR}/bev/right/dist_coeffs.txt", self.right_dist_coeffs)
+
+    np.savetxt(f"{self.DEBUG_DIR}/bev/left/intrinsics.txt", self.left_intrinsics)
+    np.savetxt(f"{self.DEBUG_DIR}/bev/left/dist_coeffs.txt", self.left_dist_coeffs)
+    np.savetxt(f"{self.DEBUG_DIR}/bev/extrinsics.txt", self.extrinsics)
 
     super().destroy_node()
 

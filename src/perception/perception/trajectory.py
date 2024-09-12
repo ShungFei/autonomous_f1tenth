@@ -13,6 +13,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.publisher import Publisher
 from rclpy.timer import Timer
 from rosgraph_msgs.msg import Clock
+from vesc_msgs.msg import VescStateStamped 
 
 import perception.util.ground_truth as GroundTruth
 from perception.util.conversion import get_time_from_header, get_time_from_clock, get_time_from_rosclock
@@ -31,7 +32,7 @@ class Trajectory(Node):
     self.vels = {
       "agent": 
         [
-          {"time": 1.0, "linear": 0.4, "angular": 0.0},
+          {"time": 1.0, "linear": 0.5, "angular": 0.0},
           {"time": 5.0, "linear": -0.4, "angular": 0.0}
         ],
       "opponent": 
@@ -125,6 +126,17 @@ class Trajectory(Node):
       10
     )
 
+    self.rpm_list = []
+
+    self.opp_pose_sub = self.create_subscription(
+      VescStateStamped,
+      '/sensors/core',
+      self.sensors_core_callback,
+      10
+    )
+
+  def sensors_core_callback(self, state: VescStateStamped):
+    self.rpm_list.append((get_time_from_header(state.header), state.state.speed))
 
   def agent_pose_callback(self, data: TFMessage):
     """
@@ -280,8 +292,10 @@ class Trajectory(Node):
     if self.debug:
       with open(f"{self.DEBUG_DIR}/start_time.txt", "w") as f:
         f.write(str(self.start_time))
+
+      np.savetxt(f"{self.DEBUG_DIR}/rpm.txt", np.array(self.rpm_list))
     super().destroy_node()
-  
+
 def main(args=None):
   rclpy.init(args=args)
   

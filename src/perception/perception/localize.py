@@ -38,6 +38,7 @@ class CarLocalizer(Node):
     self.SELECTED_DEPTH_CAMERA = "depth"
 
     os.makedirs(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}", exist_ok=True)
+    os.makedirs(f"{self.DEBUG_DIR}/{self.SELECTED_DEPTH_CAMERA}", exist_ok=True)
 
     self.agent_name = self.declare_parameter('agent_name', "f1tenth").get_parameter_value().string_value
     self.camera_name = self.declare_parameter('camera_name', "d435").get_parameter_value().string_value
@@ -135,11 +136,12 @@ class CarLocalizer(Node):
         exit(0)
 
     self.config.enable_stream(rs.stream.color, 1920, 1080, rs.format.bgr8, 30)
+    self.config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
 
     # Start streaming
     cfg = self.pipeline.start(self.config)
-    profile = cfg.get_stream(rs.stream.color)
-    color_intr = profile.as_video_stream_profile().get_intrinsics() 
+    color_profile = cfg.get_stream(rs.stream.color)
+    color_intr = color_profile.as_video_stream_profile().get_intrinsics() 
 
     self.color_intrinsics = np.array([
         [color_intr.fx, 0, color_intr.ppx],
@@ -147,6 +149,27 @@ class CarLocalizer(Node):
         [0, 0, 1]
     ])
     self.color_dist_coeffs = np.array(color_intr.coeffs)
+    
+    depth_profile = cfg.get_stream(rs.stream.depth)
+    depth_intr = depth_profile.as_video_stream_profile().get_intrinsics()
+
+    self.depth_intrinsics = np.array([
+        [depth_intr.fx, 0, depth_intr.ppx],
+        [0, depth_intr.fy, depth_intr.ppy],
+        [0, 0, 1]
+    ])
+    self.depth_dist_coeffs = np.array(depth_intr.coeffs)
+    
+    # Get depth scale
+    depth_sensor = cfg.get_device().first_depth_sensor()
+    self.depth_scale = depth_sensor.get_depth_scale()
+
+    print("Color Intrinsics: ", self.color_intrinsics)
+    print("Depth Intrinsics: ", self.depth_intrinsics)
+    print("Color Distortion Coefficients: ", self.color_dist_coeffs)
+    print("Depth Distortion Coefficients: ", self.depth_dist_coeffs)
+    print("Depth Scale: ", self.depth_scale)
+
     self.create_timer(1/30, self.rs_pose_pub_callback)
 
   def destroy_node(self):
@@ -159,6 +182,10 @@ class CarLocalizer(Node):
     np.savetxt(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/intrinsics.txt", self.color_intrinsics)
     np.savetxt(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/dist_coeffs.txt", self.color_dist_coeffs)
 
+    np.savetxt(f"{self.DEBUG_DIR}/{self.SELECTED_DEPTH_CAMERA}/intrinsics.txt", self.depth_intrinsics)
+    np.savetxt(f"{self.DEBUG_DIR}/{self.SELECTED_DEPTH_CAMERA}/dist_coeffs.txt", self.depth_dist_coeffs)
+    np.savetxt(f"{self.DEBUG_DIR}/{self.SELECTED_DEPTH_CAMERA}/depth_scale.txt", np.array([self.depth_scale]))
+
     super().destroy_node()
 
   def rs_pose_pub_callback(self):
@@ -169,13 +196,18 @@ class CarLocalizer(Node):
     """
     frames = self.pipeline.wait_for_frames()
     color_frame = frames.get_color_frame()
+    depth_frame = frames.get_depth_frame()
+
     image_np = np.asanyarray(color_frame.get_data())
+    depth_np = np.asanyarray(depth_frame.get_data())
+
     current_time = color_frame.get_timestamp() / 1000
 
     # arucos = locate_arucos(image_np, self.aruco_dictionary, self.marker_obj_points, self.color_intrinsics, self.color_dist_coeffs)
     cv2.imwrite(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/{current_time}.jpg", image_np)
-
-    if current_time - self.previous_pose_time > 0.034:
+    np.save(f"{self.DEBUG_DIR}/{self.SELECTED_DEPTH_CAMERA}/{current_time}.npy", depth_np)
+    
+    if current_time - self.previous_pose_time > 0.04:
       print(f"Current time: {current_time}, Time between two frames: {current_time - self.previous_pose_time}")
 
     self.previous_pose_time = current_time

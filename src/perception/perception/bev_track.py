@@ -214,7 +214,6 @@ class BevTracker(Node):
   
   def destroy_node(self):
     self.zed.close()
-
     os.makedirs(f"{self.DEBUG_DIR}/bev/left", exist_ok=True)
     os.makedirs(f"{self.DEBUG_DIR}/bev/right", exist_ok=True)
 
@@ -226,7 +225,7 @@ class BevTracker(Node):
     # write all the images in the queue to a file
     while len(self.image_queue) > 0:
       current_time, _, left_image, right_image = self.image_queue.popleft()
-      # cv2.imwrite(f"{self.DEBUG_DIR}/bev/left/{current_time}.jpg", left_image)
+      cv2.imwrite(f"{self.DEBUG_DIR}/bev/left/{current_time}.jpg", left_image)
       cv2.imwrite(f"{self.DEBUG_DIR}/bev/right/{current_time}.jpg", right_image)
 
     # Write the camera intrinsics to a file

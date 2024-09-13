@@ -204,7 +204,7 @@ class CarLocalizer(Node):
     current_time = int(color_frame.get_timestamp() * 1e6) # From milliseconds to nano seconds
 
     # arucos = locate_arucos(image_np, self.aruco_dictionary, self.marker_obj_points, self.color_intrinsics, self.color_dist_coeffs)
-    cv2.imwrite(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/{current_time}.jpg", image_np)
+    cv2.imwrite(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/{current_time}.png", image_np)
     np.save(f"{self.DEBUG_DIR}/{self.SELECTED_DEPTH_CAMERA}/{current_time}.npy", depth_np)
     
     if current_time - self.previous_pose_time > 4e7:
@@ -306,7 +306,7 @@ class CarLocalizer(Node):
     self.video_output.write(frame_copy)
 
     # Save image to debug directory
-    cv2.imwrite(f"{self.DEBUG_DIR}/{selected_camera}/{get_time_from_header(data.header)}.jpg", current_frame)
+    cv2.imwrite(f"{self.DEBUG_DIR}/{selected_camera}/{get_time_from_header(data.header)}.png", current_frame)
 
 
 def main(args=None):

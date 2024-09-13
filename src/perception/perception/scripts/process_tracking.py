@@ -70,7 +70,7 @@ class TrackingProcessor():
           quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
 
           if id == self.opp_back_aruco_id:
-            self.opp_rel_poses.append((image_file.strip(".jpg"), *quaternion, *tvec.flatten().tolist()))
+            self.opp_rel_poses.append((image_file.strip(".png"), *quaternion, *tvec.flatten().tolist()))
             
     pd.DataFrame(self.opp_rel_poses,
                  columns=["time", "qx", "qy", "qz", "qw", "tx", "ty", "tz"]).to_csv(f"{self.process_dir}/opp_rel_poses.csv", index=False)

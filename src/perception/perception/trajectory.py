@@ -108,6 +108,7 @@ class Trajectory(Node):
 
     if self.is_sim:
       self.start_time = 0
+      self.start_time_nanoseconds = 0
       self.clock_sub = self.create_subscription(
         Clock,
         '/clock',
@@ -116,6 +117,7 @@ class Trajectory(Node):
       )
     else:
       self.start_time = get_time_from_rosclock(self.get_clock())
+      self.start_time_nanoseconds = self.get_clock().now().nanoseconds
       self.clock_sub = self.create_timer(0.01, self.real_clock_callback)
       
 
@@ -136,7 +138,7 @@ class Trajectory(Node):
     )
 
   def sensors_core_callback(self, state: VescStateStamped):
-    self.rpm_list.append((get_time_from_header(state.header), state.state.speed))
+    self.rpm_list.append((1e9 * state.header.stamp.sec + state.header.stamp.nanosec, state.state.speed))
 
   def agent_pose_callback(self, data: TFMessage):
     """
@@ -291,8 +293,7 @@ class Trajectory(Node):
   def destroy_node(self):
     if self.debug:
       with open(f"{self.DEBUG_DIR}/start_time.txt", "w") as f:
-        f.write(str(self.start_time))
-
+        f.write(str(self.start_time_nanoseconds))
       np.savetxt(f"{self.DEBUG_DIR}/rpm.txt", np.array(self.rpm_list))
     super().destroy_node()
 

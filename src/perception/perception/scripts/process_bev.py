@@ -70,11 +70,11 @@ class BEVProcessor():
           quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
 
           if id == self.ego_aruco_id:
-            self.ego_poses.append((image_file.strip(".jpg"), *quaternion, *tvec.flatten().tolist()))
+            self.ego_poses.append((image_file.strip(".png"), *quaternion, *tvec.flatten().tolist()))
             print(f"Found ego aruco at {tvec}")
 
           elif id == self.opp_aruco_id:
-            self.opp_poses.append((image_file.strip(".jpg"), *quaternion, *tvec.flatten().tolist()))
+            self.opp_poses.append((image_file.strip(".png"), *quaternion, *tvec.flatten().tolist()))
             print(f"Found opp aruco at {tvec}")
     
     # Save the poses to csv files

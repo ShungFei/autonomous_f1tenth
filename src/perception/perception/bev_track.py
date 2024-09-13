@@ -146,7 +146,7 @@ class BevTracker(Node):
           self.previous_capture_time = current_time
           self.image_queue.append((current_time, self.previous_capture_time, 
                                    image_left.numpy(force=True), image_right.numpy(force=True)))
-          # cv2.imwrite(f"{self.DEBUG_DIR}/bev/{timestamp.get_milliseconds()}.jpg", np.copy(image.numpy()))
+          # cv2.imwrite(f"{self.DEBUG_DIR}/bev/{timestamp.get_milliseconds()}.png", np.copy(image.numpy()))
   
   def capture_callback(self):
     """
@@ -162,7 +162,7 @@ class BevTracker(Node):
       image_np = image.numpy()
 
       # arucos = locate_arucos(image_np, self.aruco_dictionary, self.marker_obj_points, self.right_intrinsics, self.right_dist_coeffs)
-      # cv2.imwrite(f"{self.DEBUG_DIR}/bev/{curr_time}.jpg", image_np)
+      # cv2.imwrite(f"{self.DEBUG_DIR}/bev/{curr_time}.png", image_np)
       self.image_queue.append((curr_time, self.prev_time_capture, image_np))
       print(curr_time - self.prev_time_capture)
       # print(arucos)
@@ -199,7 +199,7 @@ class BevTracker(Node):
     # current_frame = self.bridge.imgmsg_to_cv2(image)
     
     # # Save image to debug directory
-    # cv2.imwrite(f"{self.DEBUG_DIR}/{get_time_from_header(image.header)}.jpg", current_frame)
+    # cv2.imwrite(f"{self.DEBUG_DIR}/{get_time_from_header(image.header)}.png", current_frame)
 
     # if rvec is not None and tvec is not None:
     #   rot_matrix, _ = cv2.Rodrigues(rvec)
@@ -225,8 +225,8 @@ class BevTracker(Node):
     # write all the images in the queue to a file
     while len(self.image_queue) > 0:
       current_time, _, left_image, right_image = self.image_queue.popleft()
-      cv2.imwrite(f"{self.DEBUG_DIR}/bev/left/{current_time}.jpg", left_image)
-      cv2.imwrite(f"{self.DEBUG_DIR}/bev/right/{current_time}.jpg", right_image)
+      cv2.imwrite(f"{self.DEBUG_DIR}/bev/left/{current_time}.png", left_image)
+      cv2.imwrite(f"{self.DEBUG_DIR}/bev/right/{current_time}.png", right_image)
 
     # Write the camera intrinsics to a file
     np.savetxt(f"{self.DEBUG_DIR}/bev/right/intrinsics.txt", self.right_intrinsics)
@@ -264,7 +264,7 @@ class BevTracker(Node):
     self.video_output.write(frame_copy)
 
     # Save image to debug directory
-    cv2.imwrite(f"{self.DEBUG_DIR}/{selected_camera}/{get_time_from_header(data.header)}.jpg", current_frame)
+    cv2.imwrite(f"{self.DEBUG_DIR}/{selected_camera}/{get_time_from_header(data.header)}.png", current_frame)
 
 
 def main(args=None):

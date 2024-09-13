@@ -140,9 +140,9 @@ class BevTracker(Node):
           self.zed.retrieve_image(image_left, sl.VIEW.LEFT_UNRECTIFIED)
 
           timestamp = self.zed.get_timestamp(sl.TIME_REFERENCE.CURRENT)  # Get the timestamp at the time the image was captured
-          current_time = timestamp.get_nanoseconds() / 1e9
-          if current_time - self.previous_capture_time > 0.02:
-            print(f"Current time: {current_time}, Time between two frames: {current_time - self.previous_capture_time}")
+          current_time = timestamp.get_nanoseconds()
+          if current_time - self.previous_capture_time > 2e7:
+            print(f"Current time: {current_time}, Time between two frames: {(current_time - self.previous_capture_time) / 1e9}")
           self.previous_capture_time = current_time
           self.image_queue.append((current_time, self.previous_capture_time, 
                                    image_left.numpy(force=True), image_right.numpy(force=True)))

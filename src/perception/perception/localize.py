@@ -201,14 +201,14 @@ class CarLocalizer(Node):
     image_np = np.asanyarray(color_frame.get_data())
     depth_np = np.asanyarray(depth_frame.get_data())
 
-    current_time = color_frame.get_timestamp() / 1000
+    current_time = int(color_frame.get_timestamp() * 1e6) # From milliseconds to nano seconds
 
     # arucos = locate_arucos(image_np, self.aruco_dictionary, self.marker_obj_points, self.color_intrinsics, self.color_dist_coeffs)
     cv2.imwrite(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/{current_time}.jpg", image_np)
     np.save(f"{self.DEBUG_DIR}/{self.SELECTED_DEPTH_CAMERA}/{current_time}.npy", depth_np)
     
-    if current_time - self.previous_pose_time > 0.04:
-      print(f"Current time: {current_time}, Time between two frames: {current_time - self.previous_pose_time}")
+    if current_time - self.previous_pose_time > 4e7:
+      print(f"Current time: {current_time}, Time between two frames: {(current_time - self.previous_pose_time) / 1e9}")
 
     self.previous_pose_time = current_time
 
@@ -216,7 +216,7 @@ class CarLocalizer(Node):
     """
     Publish the estimated pose of the opponent (ROS2 Version)
     """
-    current_time = get_time_from_header(image.header)
+    current_time = 1e9 * image.header.stamp.sec + image.header.stamp.nanosec
     image_np = self.bridge.imgmsg_to_cv2(image, desired_encoding="bgr8")
     arucos = locate_arucos(image_np, self.aruco_dictionary, self.marker_obj_points, self.color_intrinsics, self.color_dist_coeffs)
 
@@ -236,8 +236,8 @@ class CarLocalizer(Node):
         
         self.opp_estimated_pose_pub.publish(msg)
       
-    if current_time - self.previous_pose_time > 0.034:
-      print(f"Current time: {current_time}, Time between two frames: {current_time - self.previous_pose_time}")
+    if current_time - self.previous_pose_time > 34e6:
+      print(f"Current time: {current_time}, Time between two frames: {(current_time - self.previous_pose_time) / 1e9}")
     self.previous_pose_time = current_time
 
   def camera_info_callback(self, data: CameraInfo):

@@ -44,7 +44,7 @@ def stereo_nodes(name, camera_name, opponent_name, debug=False):
         ),
     ]
 
-def monocular_nodes(name, camera_name, opponent_name, debug=False):
+def monocular_nodes(name, camera_name, opponent_name, enable_auto_exposure, exposure_time, gain, debug=False):
     return [
         Node(
             package="perception",
@@ -56,6 +56,9 @@ def monocular_nodes(name, camera_name, opponent_name, debug=False):
                     "agent_name": name,
                     "camera_name": camera_name,
                     "opponent_name": opponent_name,
+                    "enable_auto_exposure": enable_auto_exposure,
+                    "exposure_time": exposure_time,
+                    "gain": gain,
                     "debug": debug,
                 }
             ],
@@ -76,9 +79,12 @@ def spawn_func(context, *args, **kwargs):
     opponent_name = LaunchConfiguration("opponent_name").perform(context)
     is_stereo = LaunchConfiguration("stereo").perform(context).lower()
     debug = LaunchConfiguration("debug").perform(context).lower() == "true"
+    enable_auto_exposure = LaunchConfiguration("enable_auto_exposure").perform(context).lower() == "true"
+    exposure_time = int(LaunchConfiguration("exposure_time").perform(context))
+    gain = int(LaunchConfiguration("gain").perform(context))
 
     return [
-        *(monocular_nodes(name, camera_name, opponent_name, debug=debug) if is_stereo == "false" \
+        *(monocular_nodes(name, camera_name, opponent_name, enable_auto_exposure, exposure_time, gain, debug=debug) if is_stereo == "false" \
 			else stereo_nodes(name, stereo_camera_name, opponent_name, debug=debug)),
     ]
 
@@ -113,6 +119,18 @@ def generate_launch_description():
         name="debug", description="debug mode", default_value="false"
     )
 
+    auto_exposure_arg = DeclareLaunchArgument(
+        name="enable_auto_exposure", description="enable auto exposure", default_value="false"
+    )
+
+    exposure_time_arg = DeclareLaunchArgument(
+        name="exposure_time", description="exposure time", default_value="50"
+    )
+
+    gain_arg = DeclareLaunchArgument(
+        name="gain", description="gain", default_value="128"
+    )
+
     return LaunchDescription(
         [
             SetEnvironmentVariable(
@@ -124,6 +142,9 @@ def generate_launch_description():
             debug_arg,
             stereo_camera_name_arg,
             opponent_name_arg,
+            auto_exposure_arg,
+            exposure_time_arg,
+            gain_arg,
             OpaqueFunction(function=spawn_func),
         ]
     )

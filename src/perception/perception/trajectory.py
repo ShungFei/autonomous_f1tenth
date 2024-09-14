@@ -238,7 +238,8 @@ class Trajectory(Node):
           self.opp_vel_publisher.publish(self.create_twist_msg(next_opp_timestep["linear"], next_opp_timestep["angular"]))
       
   def real_clock_callback(self):
-    time = get_time_from_rosclock(self.get_clock()) - self.start_time
+    sec, nanosec = self.get_clock().now().seconds_nanoseconds()
+    time = sec + nanosec * 1e-9 - self.start_time
 
     # Stop the vehicles after the evaluation time has passed
     if time >= self.eval_time:
@@ -246,8 +247,8 @@ class Trajectory(Node):
         self.agent_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
         self.opp_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
       else:
-        self.agent_ackermann_pub.publish(self.create_ackermann_msg(0.0, 0.0))
-        self.opp_ackermann_pub.publish(self.create_ackermann_msg(0.0, 0.0))
+        self.agent_ackermann_pub.publish(self.create_ackermann_msg(0.0, 0.0, nanosec, sec))
+        self.opp_ackermann_pub.publish(self.create_ackermann_msg(0.0, 0.0, nanosec, sec))
       if time >= self.eval_time + self.END_BUFFER_TIME:
         raise SystemExit
       else:
@@ -262,7 +263,7 @@ class Trajectory(Node):
       if next_agent_timestep and time >= next_agent_timestep["time"]:
         self.agent_checkpoint += 1
 
-      self.agent_ackermann_pub.publish(self.create_ackermann_msg(agent_timestep["linear"], agent_timestep["angular"]))
+      self.agent_ackermann_pub.publish(self.create_ackermann_msg(agent_timestep["linear"], agent_timestep["angular"], nanosec, sec))
     
     if self.opp_checkpoint < len(self.vels["opponent"]):
       opp_timestep = self.vels["opponent"][self.opp_checkpoint]
@@ -273,7 +274,7 @@ class Trajectory(Node):
       if next_opp_timestep and time >= next_opp_timestep["time"]:
         self.opp_checkpoint += 1
 
-      self.opp_ackermann_pub.publish(self.create_ackermann_msg(opp_timestep["linear"], opp_timestep["angular"]))
+      self.opp_ackermann_pub.publish(self.create_ackermann_msg(opp_timestep["linear"], opp_timestep["angular"], nanosec, sec))
 
   def create_twist_msg(self, linear, angular):
     """
@@ -285,11 +286,13 @@ class Trajectory(Node):
 
     return msg
   
-  def create_ackermann_msg(self, linear, angular):
+  def create_ackermann_msg(self, linear, angular, nanosec, sec):
     """
     Create an AckermannDriveStamped message with the given linear and angular velocities
     """
     msg = AckermannDriveStamped()
+    msg.header.stamp.sec = sec
+    msg.header.stamp.nanosec = nanosec
     msg.drive.speed = linear
     msg.drive.steering_angle = self.twist_to_ackermann(angular, linear, self.wheel_base)
 

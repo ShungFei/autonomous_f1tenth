@@ -47,6 +47,9 @@ class CarLocalizer(Node):
     self.opponent_name = self.declare_parameter('opponent_name', "opponent").get_parameter_value().string_value
     self.debug = self.declare_parameter('debug', False).get_parameter_value().bool_value
     self.opp_back_marker_id = self.declare_parameter('opp_back_marker_id', -1).get_parameter_value().integer_value
+    self.auto_exposure = self.declare_parameter('auto_exposure', False).get_parameter_value().bool_value
+    self.exposure_time = self.declare_parameter('exposure_time', 50).get_parameter_value().integer_value
+    self.gain = self.declare_parameter('gain', 128).get_parameter_value().integer_value
 
     self.get_logger().info(f"Subscribing to {self.agent_name}")
 
@@ -162,6 +165,12 @@ class CarLocalizer(Node):
     
     # Get depth scale
     depth_sensor = cfg.get_device().first_depth_sensor()
+    color_sensor = cfg.get_device().first_color_sensor()
+
+    color_sensor.set_option(rs.option.enable_auto_exposure, 1 if self.auto_exposure else 0)
+    color_sensor.set_option(rs.option.exposure, self.exposure_time)
+    color_sensor.set_option(rs.option.gain, self.gain)
+
     self.depth_scale = depth_sensor.get_depth_scale()
 
     print("Color Intrinsics: ", self.color_intrinsics)

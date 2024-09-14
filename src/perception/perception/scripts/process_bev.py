@@ -1,26 +1,11 @@
-import rclpy
-from rclpy.node import Node
-from sensor_msgs.msg import Image, CameraInfo 
-from tf2_msgs.msg import TFMessage
-from geometry_msgs.msg import Vector3Stamped, PoseStamped
-from nav_msgs.msg import Odometry
-from cv_bridge import CvBridge
-from message_filters import Subscriber, TimeSynchronizer, ApproximateTimeSynchronizer
+import argparse
 import cv2
 import os
 import numpy as np
 import pandas as pd
-from math import sqrt
-import seaborn as sns
-from matplotlib import pyplot as plt
-import time
-from datetime import datetime
 
-import perception.util.ground_truth as GroundTruth
 from perception.util.aruco import locate_arucos
-from perception.util.conversion import get_time_from_header, get_quaternion_from_rotation_matrix
-from perception_interfaces.msg import StateEstimateStamped
-
+from perception.util.conversion import get_quaternion_from_rotation_matrix
 
 class BEVProcessor():
   """
@@ -50,19 +35,20 @@ class BEVProcessor():
         [-half_side_length, -half_side_length, 0]
     ]], dtype=np.float32)
 
-    self.intrinsics = np.loadtxt(f"{self.process_dir}/intrinsics.txt")
-    self.dist_coeffs = np.loadtxt(f"{self.process_dir}/dist_coeffs.txt")
+    # NOTE: Localisation currently only done using the right camera
+    self.intrinsics = np.loadtxt(f"{self.process_dir}/right/intrinsics.txt") # 
+    self.dist_coeffs = np.loadtxt(f"{self.process_dir}/right/dist_coeffs.txt")
 
     self.measurements = {}
     self.ego_poses = []
     self.opp_poses = []
 
   def process(self):
-    for image_file in os.listdir(self.process_dir):
+    for image_file in sorted(os.listdir(f"{self.process_dir}/right")):
       # check if the image ends with png or jpg or jpeg
       if (image_file.endswith(".png") or image_file.endswith(".jpg") or image_file.endswith(".jpeg")):
         # Load the images
-        image = cv2.imread(f"{self.process_dir}/{image_file}")
+        image = cv2.imread(f"{self.process_dir}/right/{image_file}")
         arucos = locate_arucos(image, self.aruco_dictionary, self.marker_obj_points, self.intrinsics, self.dist_coeffs)
 
         for id, (rvec, tvec) in arucos.items():
@@ -71,11 +57,9 @@ class BEVProcessor():
 
           if id == self.ego_aruco_id:
             self.ego_poses.append((image_file.strip(".png"), *quaternion, *tvec.flatten().tolist()))
-            print(f"Found ego aruco at {tvec}")
 
           elif id == self.opp_aruco_id:
             self.opp_poses.append((image_file.strip(".png"), *quaternion, *tvec.flatten().tolist()))
-            print(f"Found opp aruco at {tvec}")
     
     # Save the poses to csv files
     pd.DataFrame(self.ego_poses, 
@@ -84,12 +68,41 @@ class BEVProcessor():
                   columns=["time", "qx", "qy", "qz", "qw", "tx", "ty", "tz"]).to_csv(f"{self.process_dir}/opp_poses.csv", index=False)
 
 if __name__ == "__main__":
-  rclpy.init()
-  
-  dir = os.path.join("perception_debug", "24_09_10_17:41:35", "bev")
-  ego_aruco_id = 12
-  opp_aruco_id = 1
-  node = BEVProcessor(dir, ego_aruco_id=ego_aruco_id, opp_aruco_id=opp_aruco_id)
-  node.process()
+  parser = argparse.ArgumentParser()
 
-  rclpy.shutdown()
+  group = parser.add_mutually_exclusive_group(required=True)
+  group.add_argument("--run_dir", type=str, help="Directory containing the data for a single run")
+  group.add_argument("--latest", action="store_true", help="Process the latest run in the perception_debug directory")
+  group.add_argument("--all", action="store_true", help="Process all runs in the perception_debug directory")
+
+  parser.add_argument("--ego_aruco_id", type=int, default=1, help="ID of the ego ArUco marker")
+  parser.add_argument("--opp_aruco_id", type=int, default=14, help="ID of the opponent ArUco marker")
+  parser.add_argument("--side_length", type=float, default=0.15, help="Side length of the ArUco markers")
+
+  args = parser.parse_args()
+
+  DEBUG_DIR = "perception_debug"
+  if (args.all or args.latest) and not os.path.exists(DEBUG_DIR):
+      print("To use --all or --latest, the perception_debug directory must exist in the current terminal's working directory")
+      exit()
+    
+  if args.all:
+    for run_dir in os.listdir(DEBUG_DIR):
+      if os.path.isdir(run_dir):
+        bev_dir = os.path.join(DEBUG_DIR, run_dir, "bev")
+        node = BEVProcessor(bev_dir, side_length=args.side_length, ego_aruco_id=args.ego_aruco_id, opp_aruco_id=args.opp_aruco_id)
+        node.process()
+  elif args.latest:
+    latest_dir = max([f.path for f in os.scandir(DEBUG_DIR) if f.is_dir()], key=os.path.getmtime)
+    bev_dir = os.path.join(latest_dir, "bev")
+    node = BEVProcessor(bev_dir, side_length=args.side_length, ego_aruco_id=args.ego_aruco_id, opp_aruco_id=args.opp_aruco_id)
+    node.process()
+  elif args.run_dir:
+    bev_dir = os.path.join(args.run_dir, "bev")
+    if not os.path.exists(bev_dir):
+      print(f"Directory {bev_dir} does not exist")
+      exit()
+    
+    node = BEVProcessor(bev_dir, side_length=args.side_length, ego_aruco_id=args.ego_aruco_id, opp_aruco_id=args.opp_aruco_id)
+    node.process()
+  

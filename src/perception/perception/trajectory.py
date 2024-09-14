@@ -128,17 +128,22 @@ class Trajectory(Node):
       10
     )
 
-    self.rpm_list = []
+    self.agent_rpm_list = []
+    self.opp_rpm_list = []
 
-    self.opp_pose_sub = self.create_subscription(
+    self.agent_sensor_sub = self.create_subscription(
       VescStateStamped,
       '/sensors/core',
-      self.sensors_core_callback,
+      lambda msg: self.agent_rpm_list.append((1e9 * msg.header.stamp.sec + msg.header.stamp.nanosec, msg.state.speed)),
       10
     )
 
-  def sensors_core_callback(self, state: VescStateStamped):
-    self.rpm_list.append((1e9 * state.header.stamp.sec + state.header.stamp.nanosec, state.state.speed))
+    self.agent_sensor_sub = self.create_subscription(
+      VescStateStamped,
+      '/opponent/sensors/core',
+      lambda msg: self.opp_rpm_list.append((1e9 * msg.header.stamp.sec + msg.header.stamp.nanosec, msg.state.speed)),
+      10
+    )
 
   def agent_pose_callback(self, data: TFMessage):
     """
@@ -294,7 +299,8 @@ class Trajectory(Node):
     if self.debug:
       with open(f"{self.DEBUG_DIR}/start_time.txt", "w") as f:
         f.write(str(self.start_time_nanoseconds))
-      np.savetxt(f"{self.DEBUG_DIR}/rpm.txt", np.array(self.rpm_list))
+      np.savetxt(f"{self.DEBUG_DIR}/ego_rpm.txt", np.array(self.agent_rpm_list))
+      np.savetxt(f"{self.DEBUG_DIR}/opp_rpm.txt", np.array(self.opp_rpm_list))
     super().destroy_node()
 
 def main(args=None):

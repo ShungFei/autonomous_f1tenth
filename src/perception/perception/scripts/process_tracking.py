@@ -1,34 +1,17 @@
+import argparse
 import os
-import time
-from datetime import datetime
-from math import sqrt
 
 import cv2
 import numpy as np
 import pandas as pd
-import rclpy
-import seaborn as sns
-from cv_bridge import CvBridge
-from geometry_msgs.msg import PoseStamped, Vector3Stamped
-from matplotlib import pyplot as plt
-from message_filters import (ApproximateTimeSynchronizer, Subscriber,
-                             TimeSynchronizer)
-from nav_msgs.msg import Odometry
-from rclpy.node import Node
-from sensor_msgs.msg import CameraInfo, Image
-from tf2_msgs.msg import TFMessage
-
-import perception.util.ground_truth as GroundTruth
 from perception.util.aruco import locate_arucos
-from perception.util.conversion import (get_quaternion_from_rotation_matrix,
-                                        get_time_from_header)
-from perception_interfaces.msg import StateEstimateStamped
+from perception.util.conversion import (get_quaternion_from_rotation_matrix)
 
 class TrackingProcessor():
   """
   This class processes the dumped tracking data for the ego to localize the opponent car
   """
-  def __init__(self, process_dir, side_length=0.15, opp_back_aruco_id=1):
+  def __init__(self, process_dir, side_length=0.15, opp_back_aruco_id=15):
     self.process_dir = process_dir
     self.side_length = side_length
 
@@ -51,8 +34,8 @@ class TrackingProcessor():
         [-half_side_length, -half_side_length, 0]
     ]], dtype=np.float32)
 
-    self.intrinsics = np.loadtxt(f"{self.process_dir}/intrinsics.txt")
-    self.dist_coeffs = np.loadtxt(f"{self.process_dir}/dist_coeffs.txt")
+    self.intrinsics = np.loadtxt(f"{self.process_dir}/color/intrinsics.txt")
+    self.dist_coeffs = np.loadtxt(f"{self.process_dir}/color/dist_coeffs.txt")
 
     self.measurements = {}
     self.opp_rel_poses = []
@@ -76,11 +59,35 @@ class TrackingProcessor():
                  columns=["time", "qx", "qy", "qz", "qw", "tx", "ty", "tz"]).to_csv(f"{self.process_dir}/opp_rel_poses.csv", index=False)
 
 if __name__ == "__main__":
-  rclpy.init()
-  
-  dir = os.path.join("perception_debug", "24_09_10_17:41:35", "bev")
-  opp_back_aruco_id = 12
-  node = TrackingProcessor(dir, opp_back_aruco_id=opp_back_aruco_id)
-  node.process()
+  parser = argparse.ArgumentParser()
 
-  rclpy.shutdown()
+  group = parser.add_mutually_exclusive_group(required=True)
+  group.add_argument("--run_dir", type=str, help="Directory containing a single run's data")
+  group.add_argument("--latest", action="store_true", help="Process the latest run in the perception_debug directory")
+  group.add_argument("--all", action="store_true", help="Process all runs in the perception_debug directory")
+
+  parser.add_argument("--opp_back_aruco_id", type=int, default=15, help="ID of the ArUco marker on the back of the opponent car")
+  parser.add_argument("--side_length", type=float, default=0.15, help="Side length of the ArUco markers")
+
+  args = parser.parse_args()
+
+  DEBUG_DIR = "perception_debug"
+  if (args.all or args.latest) and not os.path.exists(DEBUG_DIR):
+      print("To use --all or --latest, the perception_debug directory must exist in the current terminal's working directory")
+      exit()
+    
+  if args.all:
+    for run_dir in os.listdir(DEBUG_DIR):
+      if os.path.isdir(run_dir):
+        node = TrackingProcessor(run_dir, side_length=args.side_length, opp_back_aruco_id=args.opp_back_aruco_id)
+        node.process()
+  elif args.latest:
+    latest_dir = max([f.path for f in os.scandir(DEBUG_DIR) if f.is_dir()], key=os.path.getmtime),
+    node = TrackingProcessor(latest_dir, side_length=args.side_length, opp_back_aruco_id=args.opp_back_aruco_id)
+    node.process()
+  elif args.run_dir:
+    if not os.path.exists(args.run_dir):
+      print(f"Directory {args.run_dir} does not exist")
+      exit()
+    node = TrackingProcessor(args.run_dir, side_length=args.side_length, opp_back_aruco_id=args.opp_back_aruco_id)
+    node.process()

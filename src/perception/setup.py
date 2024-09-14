@@ -25,6 +25,7 @@ setup(
         'console_scripts': [
             'localize = perception.localize:main',
             'stereo_localize = perception.stereo_localize:main',
+            'car_trajectory = perception.car_trajectory:main',
             'trajectory = perception.trajectory:main',
             'evaluation = perception.evaluation:main',
             'state_estimation = perception.state_estimation:main',

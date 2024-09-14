@@ -8,6 +8,7 @@ from tf2_msgs.msg import TFMessage
 import math
 import numpy as np
 from ackermann_msgs.msg import AckermannDriveStamped
+from builtin_interfaces.msg import Time
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.publisher import Publisher
@@ -116,10 +117,18 @@ class Trajectory(Node):
         10
       )
     else:
-      self.start_time = get_time_from_rosclock(self.get_clock())
-      self.start_time_nanoseconds = self.get_clock().now().nanoseconds
-      self.clock_sub = self.create_timer(0.01, self.real_clock_callback)
-      
+      secs, nsecs = self.get_clock().now().seconds_nanoseconds()
+      self.start_time = secs + nsecs / 1e9 + 5
+      self.start_time_nanoseconds = secs * 1e9 + nsecs + 5e9
+      # self.clock_sub = self.create_timer(0.01, self.real_clock_callback) # Disabled for testing
+
+      self.start_time_pub = self.create_publisher(
+        Time,
+        '/start_time',
+        10
+      )
+
+      self.start_time_pub.publish(Time(sec=secs, nanosec=nsecs))
 
     self.opp_pose_sub = self.create_subscription(
       TFMessage,

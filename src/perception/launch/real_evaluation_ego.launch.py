@@ -105,6 +105,23 @@ def spawn_func(context, *args, **kwargs):
     ],
     emulate_tty=True,
   )
+  
+  localize_node = Node(
+    package="perception",
+    executable="car_trajectory",
+    name="car_trajectory",
+    output="screen",
+    parameters=[
+      {
+        "is_opponent": False,
+        "agent_name": agent_name,
+        "opponent_name": opponent_name,
+        "debug": debug,
+        "debug_dir": debug_dir,
+      }
+    ],
+    emulate_tty=True,
+  )
 
   return [
     hardware_bringup,

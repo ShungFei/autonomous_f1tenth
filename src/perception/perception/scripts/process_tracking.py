@@ -41,11 +41,11 @@ class TrackingProcessor():
     self.opp_rel_poses = []
 
   def process(self):
-    for image_file in os.listdir(self.process_dir):
+    for image_file in os.listdir(f"{self.process_dir}/color"):
       # check if the image ends with png or jpg or jpeg
       if (image_file.endswith(".png") or image_file.endswith(".jpg") or image_file.endswith(".jpeg")):
         # Load the images
-        image = cv2.imread(f"{self.process_dir}/{image_file}")
+        image = cv2.imread(f"{self.process_dir}/color/{image_file}")
         arucos = locate_arucos(image, self.aruco_dictionary, self.marker_obj_points, self.intrinsics, self.dist_coeffs)
 
         for id, (rvec, tvec) in arucos.items():
@@ -82,7 +82,7 @@ if __name__ == "__main__":
         node = TrackingProcessor(run_dir, side_length=args.side_length, opp_back_aruco_id=args.opp_back_aruco_id)
         node.process()
   elif args.latest:
-    latest_dir = max([f.path for f in os.scandir(DEBUG_DIR) if f.is_dir()], key=os.path.getmtime),
+    latest_dir = max([f.path for f in os.scandir(DEBUG_DIR) if f.is_dir()], key=os.path.getmtime)
     node = TrackingProcessor(latest_dir, side_length=args.side_length, opp_back_aruco_id=args.opp_back_aruco_id)
     node.process()
   elif args.run_dir:

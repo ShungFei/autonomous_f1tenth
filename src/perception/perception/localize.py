@@ -7,6 +7,7 @@ from geometry_msgs.msg import Vector3Stamped, PoseStamped
 from cv_bridge import CvBridge
 from message_filters import Subscriber, ApproximateTimeSynchronizer
 from datetime import datetime
+from collections import deque
 import cv2
 import pyrealsense2 as rs
 from queue import Queue
@@ -180,6 +181,7 @@ class CarLocalizer(Node):
     print("Depth Distortion Coefficients: ", self.depth_dist_coeffs)
     print("Depth Scale: ", self.depth_scale)
 
+    self.image_queue = deque()
     self.euler_window = []
     self.create_timer(1/30, self.rs_pose_pub_callback)
 
@@ -189,6 +191,10 @@ class CarLocalizer(Node):
 
     self.pipeline.stop()
 
+    while self.image_queue:
+      time, image_np = self.image_queue.popleft()
+      cv2.imwrite(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/{time}.png", image_np)
+      
     # Save camera parameters to debug directory
     np.savetxt(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/intrinsics.txt", self.color_intrinsics)
     np.savetxt(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/dist_coeffs.txt", self.color_dist_coeffs)
@@ -209,14 +215,15 @@ class CarLocalizer(Node):
     color_frame = frames.get_color_frame()
     depth_frame = frames.get_depth_frame()
 
-    image_np = np.asanyarray(color_frame.get_data())
+    # bug if not doing deep copy of array????
+    image_np = np.copy(np.asanyarray(color_frame.get_data()))
     depth_np = np.asanyarray(depth_frame.get_data())
 
     current_time = int(color_frame.get_timestamp() * 1e6) # From milliseconds to nano seconds
 
     # arucos = locate_arucos(image_np, self.aruco_dictionary, self.marker_obj_points, self.color_intrinsics, self.color_dist_coeffs)
     # self.show_angle_diffs(arucos, 26)
-    cv2.imwrite(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/{current_time}.png", image_np)
+    self.image_queue.append((current_time, image_np))
     np.save(f"{self.DEBUG_DIR}/{self.SELECTED_DEPTH_CAMERA}/{current_time}.npy", depth_np)
     
     if current_time - self.previous_pose_time > 4e7:

@@ -51,21 +51,29 @@ class BEVProcessor():
         image = cv2.imread(f"{self.process_dir}/right/{image_file}")
         arucos = locate_arucos(image, self.aruco_dictionary, self.marker_obj_points, self.intrinsics, self.dist_coeffs)
 
-        for id, (rvec, tvec) in arucos.items():
+        if self.ego_aruco_id not in arucos:
+          self.ego_poses.append((image_file.strip(".png"), None, None, None, None, None, None, None))
+        else:
+          rvec, tvec = arucos[self.ego_aruco_id]
           rot_matrix, _ = cv2.Rodrigues(rvec)
           quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
 
-          if id == self.ego_aruco_id:
-            self.ego_poses.append((image_file.strip(".png"), *quaternion, *tvec.flatten().tolist()))
+          self.ego_poses.append((image_file.strip(".png"), *quaternion, *tvec.flatten().tolist()))
+        
+        if self.opp_aruco_id not in arucos:
+          self.opp_poses.append((image_file.strip(".png"), None, None, None, None, None, None, None))
+        else:
+          rvec, tvec = arucos[self.opp_aruco_id]
+          rot_matrix, _ = cv2.Rodrigues(rvec)
+          quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
 
-          elif id == self.opp_aruco_id:
-            self.opp_poses.append((image_file.strip(".png"), *quaternion, *tvec.flatten().tolist()))
+          self.opp_poses.append((image_file.strip(".png"), *quaternion, *tvec.flatten().tolist()))
     
     # Save the poses to csv files
     pd.DataFrame(self.ego_poses, 
-                 columns=["time", "qx", "qy", "qz", "qw", "tx", "ty", "tz"]).to_csv(f"{self.process_dir}/ego_poses.csv", index=False)
+                 columns=["time", "qx", "qy", "qz", "qw", "ax","ay", "az", "tx", "ty", "tz"]).to_csv(f"{self.process_dir}/ego_poses.csv", index=False)
     pd.DataFrame(self.opp_poses,
-                  columns=["time", "qx", "qy", "qz", "qw", "tx", "ty", "tz"]).to_csv(f"{self.process_dir}/opp_poses.csv", index=False)
+                  columns=["time", "qx", "qy", "qz", "qw", "ax","ay", "az", "tx", "ty", "tz"]).to_csv(f"{self.process_dir}/opp_poses.csv", index=False)
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()

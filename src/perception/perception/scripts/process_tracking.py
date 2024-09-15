@@ -4,6 +4,7 @@ import os
 import cv2
 import numpy as np
 import pandas as pd
+from sympy import N
 from perception.util.aruco import locate_arucos
 from perception.util.conversion import (get_quaternion_from_rotation_matrix)
 
@@ -12,7 +13,7 @@ class TrackingProcessor():
   This class processes the dumped tracking data for the ego to localize the opponent car
   """
   def __init__(self, process_dir, side_length=0.15, opp_back_aruco_id=15):
-    self.process_dir = process_dir
+    self.process_dir = f'{process_dir}/color'
     self.side_length = side_length
 
     self.opp_back_aruco_id = opp_back_aruco_id
@@ -34,8 +35,8 @@ class TrackingProcessor():
         [-half_side_length, -half_side_length, 0]
     ]], dtype=np.float32)
 
-    self.intrinsics = np.loadtxt(f"{self.process_dir}/color/intrinsics.txt")
-    self.dist_coeffs = np.loadtxt(f"{self.process_dir}/color/dist_coeffs.txt")
+    self.intrinsics = np.loadtxt(f"{self.process_dir}/intrinsics.txt")
+    self.dist_coeffs = np.loadtxt(f"{self.process_dir}/dist_coeffs.txt")
 
     self.measurements = {}
     self.opp_rel_poses = []
@@ -48,15 +49,24 @@ class TrackingProcessor():
         image = cv2.imread(f"{self.process_dir}/color/{image_file}")
         arucos = locate_arucos(image, self.aruco_dictionary, self.marker_obj_points, self.intrinsics, self.dist_coeffs)
 
-        for id, (rvec, tvec) in arucos.items():
+        if self.opp_back_aruco_id not in arucos:
+          self.opp_rel_poses.append((image_file.strip(".png"), None, None, None, None, None, None, None))
+        
+        else:
+          rvec, tvec = arucos[self.opp_back_aruco_id]
           rot_matrix, _ = cv2.Rodrigues(rvec)
           quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
 
-          if id == self.opp_back_aruco_id:
-            self.opp_rel_poses.append((image_file.strip(".png"), *quaternion, *tvec.flatten().tolist()))
+          self.opp_rel_poses.append((image_file.strip(".png"), *quaternion, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
+        # for id, (rvec, tvec) in arucos.items():
+        #   rot_matrix, _ = cv2.Rodrigues(rvec)
+        #   quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
+
+        #   if id == self.opp_back_aruco_id:
+        #     self.opp_rel_poses.append((image_file.strip(".png"), *quaternion, *tvec.flatten().tolist()))
             
     pd.DataFrame(self.opp_rel_poses,
-                 columns=["time", "qx", "qy", "qz", "qw", "tx", "ty", "tz"]).to_csv(f"{self.process_dir}/opp_rel_poses.csv", index=False)
+                 columns=["time", "qx", "qy", "qz", "qw", "ax","ay","az", "tx", "ty", "tz"]).to_csv(f"{self.process_dir}/opp_rel_poses.csv", index=False)
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()

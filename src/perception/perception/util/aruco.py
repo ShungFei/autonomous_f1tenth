@@ -20,6 +20,8 @@ def locate_arucos(image: np.ndarray, aruco_dictionary, marker_obj_points, intrin
         _, rvec, tvec = cv2.solvePnP(marker_obj_points, marker, 
                             intrinsics, dist_coeffs, flags=cv2.SOLVEPNP_IPPE_SQUARE)
         # print(id, marker, rvec, tvec)
+
+        # TODO: handle multiple markers of the same ID
         arucos[id[0]] = (rvec, tvec)
         # if self.debug == True:
         #     print('id', id[0])

@@ -1,3 +1,4 @@
+import math
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CameraInfo 
@@ -16,7 +17,7 @@ import numpy as np
 from math import sqrt
 
 import perception.util.ground_truth as GroundTruth
-from perception.util.conversion import get_time_from_header, get_quaternion_from_rotation_matrix, get_time_from_rosclock
+from perception.util.conversion import get_euler_from_quaternion, get_time_from_header, get_quaternion_from_rotation_matrix, get_time_from_rosclock
 
 class CarLocalizer(Node):
   """
@@ -179,6 +180,7 @@ class CarLocalizer(Node):
     print("Depth Distortion Coefficients: ", self.depth_dist_coeffs)
     print("Depth Scale: ", self.depth_scale)
 
+    self.euler_window = []
     self.create_timer(1/30, self.rs_pose_pub_callback)
 
   def destroy_node(self):
@@ -213,6 +215,7 @@ class CarLocalizer(Node):
     current_time = int(color_frame.get_timestamp() * 1e6) # From milliseconds to nano seconds
 
     # arucos = locate_arucos(image_np, self.aruco_dictionary, self.marker_obj_points, self.color_intrinsics, self.color_dist_coeffs)
+    # self.show_angle_diffs(arucos, 26)
     cv2.imwrite(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/{current_time}.png", image_np)
     np.save(f"{self.DEBUG_DIR}/{self.SELECTED_DEPTH_CAMERA}/{current_time}.npy", depth_np)
     
@@ -220,6 +223,24 @@ class CarLocalizer(Node):
       print(f"Current time: {current_time}, Time between two frames: {(current_time - self.previous_pose_time) / 1e9}")
 
     self.previous_pose_time = current_time
+
+  def show_angle_diffs(self, arucos, wall_aruco_id: int):
+    """Prints the differences from 0 with regards to the ideal euler orientation of an aruco marker against a wall"""
+    if len(arucos) > 0:
+      try:
+        rvec = arucos[wall_aruco_id][0]
+        rot_matrix, _ = cv2.Rodrigues(rvec)
+        quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
+        x, y, z = get_euler_from_quaternion(*quaternion)
+        x = x + math.pi if x < 0 else x - math.pi
+        z = z + math.pi / 2
+        self.euler_window.append((x, y, z))
+        if len(self.euler_window) > 10:
+          self.euler_window.pop(0)
+        avg_x, avg_y, avg_z = sum([v[0] for v in self.euler_window]) / len(self.euler_window), sum([v[1] for v in self.euler_window]) / len(self.euler_window), sum([v[2] for v in self.euler_window]) / len(self.euler_window)
+        print(f"{x:+.8f} {y:+.8f} {z:+.8f} Rolling mean: {avg_x:+.8f} {avg_y:+.8f} {avg_z:+.8f}")
+      except KeyError:
+        pass
 
   def pose_pub_callback(self, image: Image):
     """

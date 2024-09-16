@@ -3,9 +3,9 @@ from std_msgs.msg import Header
 from rosgraph_msgs.msg import Clock
 from rclpy.clock import Clock as ROSClock
 
-def get_euler_from_quaternion(qx, qy, qz, qw):
+def get_euler_from_quaternion(qx, qy, qz, qw, degrees=False, positive=False):
   """
-  Convert a quaternion to an Euler angle.
+  Convert a quaternion to an Euler angle. (XYZ extrinsic rotation)
     
   Input
       :param qx, qy, qz, qw: The orientation in quaternion [x,y,z,w] format
@@ -16,13 +16,16 @@ def get_euler_from_quaternion(qx, qy, qz, qw):
   roll = np.arctan2(2 * (qw * qx + qy * qz), 1 - 2 * (qx**2 + qy**2))
   pitch = np.arcsin(2 * (qw * qy - qz * qx))
   yaw = np.arctan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy**2 + qz**2))
-    
+  if positive:
+    roll, pitch, yaw = (roll) % (2 * np.pi), (pitch) % (2 * np.pi), (yaw ) % (2 * np.pi)
+  if degrees:
+    roll, pitch, yaw = np.degrees(roll), np.degrees(pitch), np.degrees(yaw)
+  
   return roll, pitch, yaw
 
-# TODO: this uses a different convention to get_euler_from_quaternion
-def get_euler_from_rotation_matrix(R):
+def get_euler_from_rotation_matrix(R, degrees=False):
     """
-    Convert a rotation matrix to an Euler angle.
+    Convert a rotation matrix to an Euler angle. (XYZ extrinsic rotation)
         
     Input
         :param R: The rotation matrix
@@ -30,53 +33,13 @@ def get_euler_from_rotation_matrix(R):
     Output
         :return roll, pitch, yaw: The roll, pitch, and yaw angles in radians
     """
-    if R[1, 0] > 0.998:
-        pitch = np.pi / 2
-        yaw = np.arctan2(R[0, 2], R[2, 2])
-        roll = 0
-    elif R[1, 0] < -0.998:
-        pitch = -np.pi / 2
-        yaw = np.arctan2(R[0, 2], R[2, 2])
-        roll = 0
-    else:
-        pitch = np.arcsin(R[1, 0])
-        yaw = np.arctan2(-R[2, 0], R[0, 0])
-        roll = np.arctan2(-R[1, 2], R[1, 1])
+    yaw = np.arctan2(R[1, 0], R[0, 0])
+    pitch = np.arcsin(-R[2, 0])
+    roll = np.arctan2(R[2, 1], R[2, 2])
     
-    return yaw, pitch, roll
-
-# TODO: this uses a different convention to get_euler_from_quaternion
-def get_euler_from_rodrigues(rvec):
-    """
-    Convert a Rodrigues vector to an Euler angle.
-        
-    Input
-        :param rvec: The Rodrigues vector
-        
-    Output
-        :return roll, pitch, yaw: The roll, pitch, and yaw angles in radians
-    """
-    theta = np.linalg.norm(rvec)
-    ax = rvec / theta
-    print(np.linalg.norm(ax))
-    s = np.sin(theta)
-    c = np.cos(theta)
-    t = 1 - c
-
-    if (ax[0] * ax[1] * t + ax[2] * s) > 0.998:
-        pitch = np.pi / 2
-        yaw = 2 * np.arctan2(ax[0] * np.sin(theta / 2), np.cos(theta / 2))
-        roll = 0
-    elif (ax[0] * ax[1] * t + ax[2] * s) < -0.998:
-        pitch = -np.pi / 2
-        yaw = -2 * np.arctan2(ax[0] * np.sin(theta / 2), np.cos(theta / 2))
-        roll = 0
-    else:
-        pitch = np.arcsin(ax[0] * ax[1] * t + ax[2] * s)
-        yaw = np.arctan2(ax[1]*s-ax[0]*ax[2]*t, 1-(ax[1]**2+ax[2]**2)*t)
-        roll = np.arctan2(ax[0]*s-ax[1]*ax[2]*t, 1-(ax[0]**2+ax[2]**2)*t)
-    
-    return yaw, pitch, roll
+    if degrees:
+        return np.degrees(roll), np.degrees(pitch), np.degrees(yaw)
+    return roll, pitch, yaw
 
 def get_rotation_matrix_from_quaternion(qx, qy, qz, qw):
   """
@@ -95,7 +58,10 @@ def get_rotation_matrix_from_quaternion(qx, qy, qz, qw):
   ])
   return R
 
-def get_quaternion_from_rodrigues(rvec):
+def quaternion_conj(qx, qy, qz, qw):
+  return np.array([-qx, -qy, -qz, qw]) / np.linalg.norm([qx, qy, qz, qw])
+
+def get_quaternion_from_rodrigues(rvec, flatten=True):
     """
     Convert a Rodrigues vector to a quaternion.
 
@@ -105,6 +71,8 @@ def get_quaternion_from_rodrigues(rvec):
     Output
         :return q: The orientation in quaternion [x,y,z,w] format
     """
+    if flatten:
+        rvec = rvec.flatten()
     theta = np.linalg.norm(rvec)
     ax = rvec / theta
 
@@ -116,6 +84,22 @@ def get_quaternion_from_rodrigues(rvec):
     q = np.array([qx, qy, qz, qw])
     return q
 
+def get_axis_angle_from_rodrigues(rvec):
+    """
+    Convert a Rodrigues vector to an axis-angle representation.
+    
+    Input
+        :param rvec: The Rodrigues vector
+    
+    Output
+        :return ax, theta: The axis and angle of rotation
+    """
+    theta = np.linalg.norm(rvec)
+    ax = rvec / theta
+
+    ax_ang = np.append(ax, theta)
+
+    return ax_ang
 
 def get_quaternion_from_rotation_matrix(R):
     """

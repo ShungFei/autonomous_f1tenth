@@ -5,20 +5,18 @@ import numpy as np
 import pandas as pd
 
 from perception.util.aruco import locate_arucos
-from perception.util.conversion import get_quaternion_from_rotation_matrix
+from perception.util.conversion import get_quaternion_from_rodrigues
 
 class BEVProcessor():
   """
   This class processes the dumped BEV images to localize the ego and opponent cars
   """
-  def __init__(self, process_dir, side_length=0.15, ego_aruco_id=0, opp_aruco_id=1):
+  def __init__(self, process_dir, side_length=0.15, ego_aruco_id=0, opp_aruco_id=1, reproj_error_threshold=1.0):
     self.process_dir = process_dir
     self.side_length = side_length
 
     self.ego_aruco_id = ego_aruco_id
     self.opp_aruco_id = opp_aruco_id
-
-    # change this to the folder where the images are stored
 
     self.detector_params = cv2.aruco.DetectorParameters()
     self.detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
@@ -35,50 +33,65 @@ class BEVProcessor():
         [-half_side_length, -half_side_length, 0]
     ]], dtype=np.float32)
 
+    self.reproj_error_threshold = reproj_error_threshold
     # NOTE: Localisation currently only done using the right camera
-    self.intrinsics = np.loadtxt(f"{self.process_dir}/right/intrinsics.txt") # 
-    self.dist_coeffs = np.loadtxt(f"{self.process_dir}/right/dist_coeffs.txt")
+    # self.intrinsics = np.loadtxt(f"{self.process_dir}/right/intrinsics.txt") # 
+    # self.dist_coeffs = np.loadtxt(f"{self.process_dir}/right/dist_coeffs.txt")
 
     self.measurements = {}
-    self.ego_poses = []
-    self.opp_poses = []
 
   def process(self):
-    for image_file in sorted(os.listdir(f"{self.process_dir}/right")):
-      # check if the image ends with png or jpg or jpeg
-      if (image_file.endswith(".png") or image_file.endswith(".jpg") or image_file.endswith(".jpeg")):
-        # Load the images
-        image = cv2.imread(f"{self.process_dir}/right/{image_file}")
-        arucos = locate_arucos(image, self.aruco_dictionary, self.marker_obj_points, self.intrinsics, self.dist_coeffs)
+    for process_sub_dir, _, _ in os.walk(self.process_dir):
+      print('Processing:', process_sub_dir)
+      image_files = [image_file for image_file in os.listdir(f"{process_sub_dir}") if \
+                     image_file.endswith(".png") or image_file.endswith(".jpg") or image_file.endswith(".jpeg")]
+      
+      if len(image_files) == 0:
+        print(f"Skipping {process_sub_dir} as no images found")
+        continue
+      if not os.path.exists(f"{process_sub_dir}/intrinsics.txt") or not os.path.exists(f"{process_sub_dir}/dist_coeffs.txt"):
+        print(f"Skipping {process_sub_dir} as intrinsics.txt or dist_coeffs.txt is missing")
+        continue
 
-        if self.ego_aruco_id not in arucos:
-          self.ego_poses.append((image_file.strip(".png"), *([None] * 10)))
-        else:
-          rvec, tvec = arucos[self.ego_aruco_id]
-          rot_matrix, _ = cv2.Rodrigues(rvec)
-          quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
+      intrinsics = np.loadtxt(f"{process_sub_dir}/intrinsics.txt")
+      dist_coeffs = np.loadtxt(f"{process_sub_dir}/dist_coeffs.txt")
 
-          self.ego_poses.append((image_file.strip(".png"), *quaternion, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
-        
-        if self.opp_aruco_id not in arucos:
-          self.opp_poses.append((image_file.strip(".png"), *([None] * 10)))
-        else:
-          rvec, tvec = arucos[self.opp_aruco_id]
-          rot_matrix, _ = cv2.Rodrigues(rvec)
-          quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
+      ego_poses = []
+      opp_poses = []
 
-          self.opp_poses.append((image_file.strip(".png"), *quaternion, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
-    
-    # Save the poses to csv files
-    ego_df = pd.DataFrame(self.ego_poses, 
-                 columns=["time", "qx", "qy", "qz", "qw", "ax", "ay", "az", "tx", "ty", "tz"])
-    ego_df.sort_values(by="time", inplace=True)
-    ego_df.to_csv(f"{self.process_dir}/ego_poses.csv", index=False)
+      for image_file in image_files:
+        # check if the image ends with png or jpg or jpeg
+        if (image_file.endswith(".png") or image_file.endswith(".jpg") or image_file.endswith(".jpeg")):
+          # Load the images
+          image = cv2.imread(f"{process_sub_dir}/{image_file}")
+          arucos = locate_arucos(image, self.aruco_dictionary, self.marker_obj_points, intrinsics, dist_coeffs)
 
-    opp_df = pd.DataFrame(self.opp_poses,
+          if self.ego_aruco_id not in arucos:
+            ego_poses.append((image_file.strip(".png"), *([None] * 10)))
+          else:
+            rvec, tvec = arucos[self.ego_aruco_id]
+            quaternion = get_quaternion_from_rodrigues(rvec)
+
+            ego_poses.append((image_file.strip(".png"), *quaternion, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
+          
+          if self.opp_aruco_id not in arucos:
+            opp_poses.append((image_file.strip(".png"), *([None] * 10)))
+          else:
+            rvec, tvec = arucos[self.opp_aruco_id]
+            quaternion = get_quaternion_from_rodrigues(rvec)
+
+            opp_poses.append((image_file.strip(".png"), *quaternion, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
+      
+      # Save the poses to csv files
+      ego_df = pd.DataFrame(ego_poses, 
                   columns=["time", "qx", "qy", "qz", "qw", "ax", "ay", "az", "tx", "ty", "tz"])
-    opp_df.sort_values(by="time", inplace=True)
-    opp_df.to_csv(f"{self.process_dir}/opp_poses.csv", index=False)
+      ego_df.sort_values(by="time", inplace=True)
+      ego_df.to_csv(f"{process_sub_dir}/ego_poses.csv", index=False)
+
+      opp_df = pd.DataFrame(opp_poses,
+                    columns=["time", "qx", "qy", "qz", "qw", "ax", "ay", "az", "tx", "ty", "tz"])
+      opp_df.sort_values(by="time", inplace=True)
+      opp_df.to_csv(f"{process_sub_dir}/opp_poses.csv", index=False)
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
@@ -115,13 +128,5 @@ if __name__ == "__main__":
     if not os.path.exists(args.run_dir):
       print(f"Directory {args.run_dir} does not exist")
       exit()
-
-    found = False
-    for root, dirs, files in os.walk(args.run_dir):
-      if root.endswith("bev"):
-        bev_dir = root
-        node = BEVProcessor(bev_dir, side_length=args.side_length, ego_aruco_id=args.ego_aruco_id, opp_aruco_id=args.opp_aruco_id)
-        node.process()
-        found = True
-    if not found:
-      print(f"No BEV directory found in {args.run_dir}")
+    node = BEVProcessor(args.run_dir, side_length=args.side_length, ego_aruco_id=args.ego_aruco_id, opp_aruco_id=args.opp_aruco_id)
+    node.process()

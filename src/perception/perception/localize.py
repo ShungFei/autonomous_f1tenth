@@ -18,7 +18,7 @@ import numpy as np
 from math import sqrt
 
 import perception.util.ground_truth as GroundTruth
-from perception.util.conversion import get_euler_from_quaternion, get_time_from_header, get_quaternion_from_rotation_matrix, get_time_from_rosclock
+from perception.util.conversion import get_euler_from_quaternion, get_quaternion_from_rodrigues, get_time_from_header, get_quaternion_from_rotation_matrix, get_time_from_rosclock
 
 class CarLocalizer(Node):
   """
@@ -236,8 +236,7 @@ class CarLocalizer(Node):
     if len(arucos) > 0:
       try:
         rvec = arucos[wall_aruco_id][0]
-        rot_matrix, _ = cv2.Rodrigues(rvec)
-        quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
+        quaternion = get_quaternion_from_rodrigues(rvec)
         x, y, z = get_euler_from_quaternion(*quaternion)
         x = x + math.pi if x < 0 else x - math.pi
         z = z + math.pi / 2
@@ -264,8 +263,7 @@ class CarLocalizer(Node):
       if self.opp_back_marker_id in arucos:
         rvec, tvec = arucos[self.opp_back_marker_id]
     
-        rot_matrix, _ = cv2.Rodrigues(rvec)
-        quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
+        quaternion = get_quaternion_from_rodrigues(rvec)
 
         # Publish the estimated pose
         msg = PoseStamped()

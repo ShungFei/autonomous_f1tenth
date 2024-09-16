@@ -13,7 +13,7 @@ class TrackingProcessor():
   This class processes the dumped tracking data for the ego to localize the opponent car
   """
   def __init__(self, process_dir, side_length=0.15, opp_back_aruco_id=15):
-    self.process_dir = f'{process_dir}/color'
+    self.process_dir = f'{process_dir}'
     self.side_length = side_length
 
     self.opp_back_aruco_id = opp_back_aruco_id
@@ -42,15 +42,15 @@ class TrackingProcessor():
     self.opp_rel_poses = []
 
   def process(self):
-    for image_file in os.listdir(f"{self.process_dir}/color"):
+    for image_file in os.listdir(f"{self.process_dir}"):
       # check if the image ends with png or jpg or jpeg
       if (image_file.endswith(".png") or image_file.endswith(".jpg") or image_file.endswith(".jpeg")):
         # Load the images
-        image = cv2.imread(f"{self.process_dir}/color/{image_file}")
+        image = cv2.imread(f"{self.process_dir}/{image_file}")
         arucos = locate_arucos(image, self.aruco_dictionary, self.marker_obj_points, self.intrinsics, self.dist_coeffs)
 
         if self.opp_back_aruco_id not in arucos:
-          self.opp_rel_poses.append((image_file.strip(".png"), None, None, None, None, None, None, None))
+          self.opp_rel_poses.append((image_file.strip(".png"), *([None] * 10)))
         
         else:
           rvec, tvec = arucos[self.opp_back_aruco_id]
@@ -58,15 +58,12 @@ class TrackingProcessor():
           quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
 
           self.opp_rel_poses.append((image_file.strip(".png"), *quaternion, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
-        # for id, (rvec, tvec) in arucos.items():
-        #   rot_matrix, _ = cv2.Rodrigues(rvec)
-        #   quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
 
-        #   if id == self.opp_back_aruco_id:
-        #     self.opp_rel_poses.append((image_file.strip(".png"), *quaternion, *tvec.flatten().tolist()))
-            
-    pd.DataFrame(self.opp_rel_poses,
-                 columns=["time", "qx", "qy", "qz", "qw", "ax","ay","az", "tx", "ty", "tz"]).to_csv(f"{self.process_dir}/opp_rel_poses.csv", index=False)
+    df = pd.DataFrame(self.opp_rel_poses,
+                 columns=["time", "qx", "qy", "qz", "qw", "ax", "ay", "az", "tx", "ty", "tz"])
+    
+    df.sort_values(by="time", inplace=True)
+    df.to_csv(f"{self.process_dir}/opp_rel_poses.csv", index=False)
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
@@ -99,5 +96,13 @@ if __name__ == "__main__":
     if not os.path.exists(args.run_dir):
       print(f"Directory {args.run_dir} does not exist")
       exit()
-    node = TrackingProcessor(args.run_dir, side_length=args.side_length, opp_back_aruco_id=args.opp_back_aruco_id)
-    node.process()
+
+    found = False
+    for root, dirs, files in os.walk(args.run_dir):
+      if root.endswith("color"):
+        process_dir = root
+        node = TrackingProcessor(process_dir, side_length=args.side_length, opp_back_aruco_id=args.opp_back_aruco_id)
+        node.process()
+        found = True
+    if not found:
+      print(f"No image directory found in {args.run_dir}")

@@ -244,8 +244,11 @@ class CarLocalizer(Node):
         self.euler_window.append((x, y, z))
         if len(self.euler_window) > 10:
           self.euler_window.pop(0)
-        avg_x, avg_y, avg_z = sum([v[0] for v in self.euler_window]) / len(self.euler_window), sum([v[1] for v in self.euler_window]) / len(self.euler_window), sum([v[2] for v in self.euler_window]) / len(self.euler_window)
-        print(f"{x:+.8f} {y:+.8f} {z:+.8f} Rolling mean: {avg_x:+.8f} {avg_y:+.8f} {avg_z:+.8f}")
+        avg_x, avg_y, avg_z = sum([v[0] for v in self.euler_window]) / len(self.euler_window), sum([v[1] for v in self.euler_window]) / len(self.euler_window), sum([v[2] for v in self.euler_window]) / len(self.euler_window)\
+        
+        x_deg, y_deg, z_deg = math.degrees(x), math.degrees(y), math.degrees(z)
+        avg_x_deg, avg_y_deg, avg_z_deg = math.degrees(avg_x), math.degrees(avg_y), math.degrees(avg_z)
+        print(f"{x_deg:+.8f} {y_deg:+.8f} {z_deg:+.8f} Rolling mean: {avg_x_deg:+.8f} {avg_y_deg:+.8f} {avg_z_deg:+.8f}")
       except KeyError:
         pass
 

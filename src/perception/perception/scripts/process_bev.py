@@ -52,28 +52,33 @@ class BEVProcessor():
         arucos = locate_arucos(image, self.aruco_dictionary, self.marker_obj_points, self.intrinsics, self.dist_coeffs)
 
         if self.ego_aruco_id not in arucos:
-          self.ego_poses.append((image_file.strip(".png"), None, None, None, None, None, None, None))
+          self.ego_poses.append((image_file.strip(".png"), *([None] * 10)))
         else:
           rvec, tvec = arucos[self.ego_aruco_id]
           rot_matrix, _ = cv2.Rodrigues(rvec)
           quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
 
-          self.ego_poses.append((image_file.strip(".png"), *quaternion, *tvec.flatten().tolist()))
+          self.ego_poses.append((image_file.strip(".png"), *quaternion, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
         
         if self.opp_aruco_id not in arucos:
-          self.opp_poses.append((image_file.strip(".png"), None, None, None, None, None, None, None))
+          self.opp_poses.append((image_file.strip(".png"), *([None] * 10)))
         else:
           rvec, tvec = arucos[self.opp_aruco_id]
           rot_matrix, _ = cv2.Rodrigues(rvec)
           quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
 
-          self.opp_poses.append((image_file.strip(".png"), *quaternion, *tvec.flatten().tolist()))
+          self.opp_poses.append((image_file.strip(".png"), *quaternion, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
     
     # Save the poses to csv files
-    pd.DataFrame(self.ego_poses, 
-                 columns=["time", "qx", "qy", "qz", "qw", "ax","ay", "az", "tx", "ty", "tz"]).to_csv(f"{self.process_dir}/ego_poses.csv", index=False)
-    pd.DataFrame(self.opp_poses,
-                  columns=["time", "qx", "qy", "qz", "qw", "ax","ay", "az", "tx", "ty", "tz"]).to_csv(f"{self.process_dir}/opp_poses.csv", index=False)
+    ego_df = pd.DataFrame(self.ego_poses, 
+                 columns=["time", "qx", "qy", "qz", "qw", "ax", "ay", "az", "tx", "ty", "tz"])
+    ego_df.sort_values(by="time", inplace=True)
+    ego_df.to_csv(f"{self.process_dir}/ego_poses.csv", index=False)
+
+    opp_df = pd.DataFrame(self.opp_poses,
+                  columns=["time", "qx", "qy", "qz", "qw", "ax", "ay", "az", "tx", "ty", "tz"])
+    opp_df.sort_values(by="time", inplace=True)
+    opp_df.to_csv(f"{self.process_dir}/opp_poses.csv", index=False)
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
@@ -106,11 +111,17 @@ if __name__ == "__main__":
     node = BEVProcessor(bev_dir, side_length=args.side_length, ego_aruco_id=args.ego_aruco_id, opp_aruco_id=args.opp_aruco_id)
     node.process()
   elif args.run_dir:
-    bev_dir = os.path.join(args.run_dir, "bev")
-    if not os.path.exists(bev_dir):
-      print(f"Directory {bev_dir} does not exist")
+    # walk through the run directory
+    if not os.path.exists(args.run_dir):
+      print(f"Directory {args.run_dir} does not exist")
       exit()
-    
-    node = BEVProcessor(bev_dir, side_length=args.side_length, ego_aruco_id=args.ego_aruco_id, opp_aruco_id=args.opp_aruco_id)
-    node.process()
-  
+
+    found = False
+    for root, dirs, files in os.walk(args.run_dir):
+      if root.endswith("bev"):
+        bev_dir = root
+        node = BEVProcessor(bev_dir, side_length=args.side_length, ego_aruco_id=args.ego_aruco_id, opp_aruco_id=args.opp_aruco_id)
+        node.process()
+        found = True
+    if not found:
+      print(f"No BEV directory found in {args.run_dir}")

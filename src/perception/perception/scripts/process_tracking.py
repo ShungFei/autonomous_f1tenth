@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from sympy import N
 from perception.util.aruco import locate_arucos
-from perception.util.conversion import (get_quaternion_from_rotation_matrix)
+from perception.util.conversion import get_quaternion_from_rodrigues
 
 class TrackingProcessor():
   """
@@ -35,35 +35,47 @@ class TrackingProcessor():
         [-half_side_length, -half_side_length, 0]
     ]], dtype=np.float32)
 
-    self.intrinsics = np.loadtxt(f"{self.process_dir}/intrinsics.txt")
-    self.dist_coeffs = np.loadtxt(f"{self.process_dir}/dist_coeffs.txt")
-
     self.measurements = {}
     self.opp_rel_poses = []
 
   def process(self):
-    for image_file in os.listdir(f"{self.process_dir}"):
-      # check if the image ends with png or jpg or jpeg
-      if (image_file.endswith(".png") or image_file.endswith(".jpg") or image_file.endswith(".jpeg")):
-        # Load the images
-        image = cv2.imread(f"{self.process_dir}/{image_file}")
-        arucos = locate_arucos(image, self.aruco_dictionary, self.marker_obj_points, self.intrinsics, self.dist_coeffs)
+    for process_sub_dir, _, _ in os.walk(self.process_dir):
+      print('Processing:', process_sub_dir)
 
-        if self.opp_back_aruco_id not in arucos:
-          self.opp_rel_poses.append((image_file.strip(".png"), *([None] * 10)))
-        
-        else:
-          rvec, tvec = arucos[self.opp_back_aruco_id]
-          rot_matrix, _ = cv2.Rodrigues(rvec)
-          quaternion = get_quaternion_from_rotation_matrix(rot_matrix)
+      image_files = [image_file for image_file in os.listdir(f"{process_sub_dir}") if \
+                    image_file.endswith(".png") or image_file.endswith(".jpg") or image_file.endswith(".jpeg")]
+      
+      if len(image_files) == 0:
+        print(f"Skipping {process_sub_dir} as no images found")
+        continue
+      if not os.path.exists(f"{process_sub_dir}/intrinsics.txt") or not os.path.exists(f"{process_sub_dir}/dist_coeffs.txt"):
+        print(f"Skipping {process_sub_dir} as intrinsics.txt or dist_coeffs.txt is missing")
+        continue
+      
+      intrinsics = np.loadtxt(f"{process_sub_dir}/intrinsics.txt")
+      dist_coeffs = np.loadtxt(f"{process_sub_dir}/dist_coeffs.txt")
 
-          self.opp_rel_poses.append((image_file.strip(".png"), *quaternion, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
+      opp_rel_poses = []
 
-    df = pd.DataFrame(self.opp_rel_poses,
-                 columns=["time", "qx", "qy", "qz", "qw", "ax", "ay", "az", "tx", "ty", "tz"])
-    
-    df.sort_values(by="time", inplace=True)
-    df.to_csv(f"{self.process_dir}/opp_rel_poses.csv", index=False)
+      for image_file in image_files:
+        if (image_file.endswith(".png") or image_file.endswith(".jpg") or image_file.endswith(".jpeg")):
+          # Load the images
+          image = cv2.imread(f"{process_sub_dir}/{image_file}")
+          arucos = locate_arucos(image, self.aruco_dictionary, self.marker_obj_points, intrinsics, dist_coeffs)
+          if self.opp_back_aruco_id not in arucos:
+            opp_rel_poses.append((image_file.strip(".png"), *([None] * 10)))
+          
+          else:
+            rvec, tvec = arucos[self.opp_back_aruco_id]
+            quaternion = get_quaternion_from_rodrigues(rvec)
+
+            opp_rel_poses.append((image_file.strip(".png"), *quaternion, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
+
+      df = pd.DataFrame(opp_rel_poses,
+                  columns=["time", "qx", "qy", "qz", "qw", "ax", "ay", "az", "tx", "ty", "tz"])
+      
+      df.sort_values(by="time", inplace=True)
+      df.to_csv(f"{process_sub_dir}/opp_rel_poses.csv", index=False)
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
@@ -96,13 +108,5 @@ if __name__ == "__main__":
     if not os.path.exists(args.run_dir):
       print(f"Directory {args.run_dir} does not exist")
       exit()
-
-    found = False
-    for root, dirs, files in os.walk(args.run_dir):
-      if root.endswith("color"):
-        process_dir = root
-        node = TrackingProcessor(process_dir, side_length=args.side_length, opp_back_aruco_id=args.opp_back_aruco_id)
-        node.process()
-        found = True
-    if not found:
-      print(f"No image directory found in {args.run_dir}")
+    node = TrackingProcessor(args.run_dir, side_length=args.side_length, opp_back_aruco_id=args.opp_back_aruco_id)
+    node.process()

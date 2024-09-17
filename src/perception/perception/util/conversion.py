@@ -2,6 +2,7 @@ import numpy as np
 from std_msgs.msg import Header
 from rosgraph_msgs.msg import Clock
 from rclpy.clock import Clock as ROSClock
+from scipy.spatial.transform import Rotation
 
 def get_euler_from_quaternion(qx, qy, qz, qw, degrees=False, positive=False):
   """
@@ -13,13 +14,9 @@ def get_euler_from_quaternion(qx, qy, qz, qw, degrees=False, positive=False):
   Output
       :return roll, pitch, yaw: The roll, pitch, and yaw angles in radians
   """
-  roll = np.arctan2(2 * (qw * qx + qy * qz), 1 - 2 * (qx**2 + qy**2))
-  pitch = np.arcsin(2 * (qw * qy - qz * qx))
-  yaw = np.arctan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy**2 + qz**2))
-  if positive:
-    roll, pitch, yaw = (roll) % (2 * np.pi), (pitch) % (2 * np.pi), (yaw ) % (2 * np.pi)
-  if degrees:
-    roll, pitch, yaw = np.degrees(roll), np.degrees(pitch), np.degrees(yaw)
+
+  rotation = Rotation.from_quat([qx, qy, qz, qw])
+  roll, pitch, yaw = rotation.as_euler('xyz')
   
   return roll, pitch, yaw
 
@@ -33,12 +30,9 @@ def get_euler_from_rotation_matrix(R, degrees=False):
     Output
         :return roll, pitch, yaw: The roll, pitch, and yaw angles in radians
     """
-    yaw = np.arctan2(R[1, 0], R[0, 0])
-    pitch = np.arcsin(-R[2, 0])
-    roll = np.arctan2(R[2, 1], R[2, 2])
-    
-    if degrees:
-        return np.degrees(roll), np.degrees(pitch), np.degrees(yaw)
+    rotation = Rotation.from_matrix(R)
+    roll, pitch, yaw = rotation.as_euler('xyz')
+
     return roll, pitch, yaw
 
 def get_rotation_matrix_from_quaternion(qx, qy, qz, qw):
@@ -57,6 +51,33 @@ def get_rotation_matrix_from_quaternion(qx, qy, qz, qw):
       [2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx**2 + qy**2)]
   ])
   return R
+
+def get_quaternion_from_euler(roll, pitch, yaw, degrees=False):
+    """
+    Convert an Euler angle to a quaternion.
+    
+    Input
+        :param roll, pitch, yaw: The roll, pitch, and yaw angles in radians
+    
+    Output
+        :return qx, qy, qz, qw: The orientation in quaternion [x,y,z,w] format
+    """
+    if degrees:
+        roll, pitch, yaw = np.radians(roll), np.radians(pitch), np.radians(yaw)
+    
+    cy = np.cos(yaw * 0.5)
+    sy = np.sin(yaw * 0.5)
+    cp = np.cos(pitch * 0.5)
+    sp = np.sin(pitch * 0.5)
+    cr = np.cos(roll * 0.5)
+    sr = np.sin(roll * 0.5)
+
+    qw = cr * cp * cy + sr * sp * sy
+    qx = sr * cp * cy - cr * sp * sy
+    qy = cr * sp * cy + sr * cp * sy
+    qz = cr * cp * sy - sr * sp * cy
+
+    return qx, qy, qz, qw
 
 def quaternion_conj(qx, qy, qz, qw):
   return np.array([-qx, -qy, -qz, qw]) / np.linalg.norm([qx, qy, qz, qw])

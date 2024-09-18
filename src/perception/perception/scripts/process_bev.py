@@ -6,6 +6,7 @@ import pandas as pd
 
 from perception.util.aruco import locate_arucos
 from perception.util.conversion import get_quaternion_from_rodrigues
+import perception.util.conversion as conv
 
 class BEVProcessor():
   """
@@ -64,23 +65,23 @@ class BEVProcessor():
         if (image_file.endswith(".png") or image_file.endswith(".jpg") or image_file.endswith(".jpeg")):
           # Load the images
           image = cv2.imread(f"{process_sub_dir}/{image_file}")
-          arucos = locate_arucos(image, self.aruco_dictionary, self.marker_obj_points, intrinsics, dist_coeffs)
+          arucos = locate_arucos(image, self.aruco_dictionary, self.marker_obj_points, intrinsics, dist_coeffs, output_all=True)
 
           if self.ego_aruco_id not in arucos:
             ego_poses.append((image_file.strip(".png"), *([None] * 10)))
           else:
-            rvec, tvec = arucos[self.ego_aruco_id]
-            quaternion = get_quaternion_from_rodrigues(rvec)
+            rvecs, tvecs, reproj_errors = arucos[self.ego_aruco_id]
+            rvec, tvec, quat, roll, pitch, yaw = self.select_best_solution(rvecs, tvecs, reproj_errors)
+            # print(f"rvec: {rvec}, tvec: {tvec}, quat: {quat}, roll: {roll}, pitch: {pitch}, yaw: {yaw}")
 
-            ego_poses.append((image_file.strip(".png"), *quaternion, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
+            ego_poses.append((image_file.strip(".png"), *quat, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
           
           if self.opp_aruco_id not in arucos:
             opp_poses.append((image_file.strip(".png"), *([None] * 10)))
           else:
-            rvec, tvec = arucos[self.opp_aruco_id]
-            quaternion = get_quaternion_from_rodrigues(rvec)
+            rvec, tvec, quat, roll, pitch, yaw = self.select_best_solution(*arucos[self.opp_aruco_id])
 
-            opp_poses.append((image_file.strip(".png"), *quaternion, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
+            opp_poses.append((image_file.strip(".png"), *quat, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
       
       # Save the poses to csv files
       ego_df = pd.DataFrame(ego_poses, 
@@ -93,6 +94,30 @@ class BEVProcessor():
       opp_df.sort_values(by="time", inplace=True)
       opp_df.to_csv(f"{process_sub_dir}/opp_poses.csv", index=False)
 
+  def select_best_solution(self, rvecs, tvecs, reproj_errors):
+    chosen_rvec, chosen_tvec = rvecs[0], tvecs[0]
+    chosen_quat = get_quaternion_from_rodrigues(chosen_rvec)
+    chosen_roll, chosen_pitch, chosen_yaw = conv.get_euler_from_quaternion(*chosen_quat, degrees=True)
+    chosen_angle_match = np.sqrt((180 - abs(chosen_roll)) ** 2 + abs(chosen_pitch) ** 2)
+
+    for i in range(1, len(rvecs)):
+      rvec, tvec, reproj_error = rvecs[i], tvecs[i], reproj_errors[i]
+      quaternion = get_quaternion_from_rodrigues(rvec)
+      roll, pitch, yaw = conv.get_euler_from_quaternion(*quaternion, degrees=True)
+
+      # we expect the rotation in the y-axis to be closer to 0 and x-axis to be 180, so we choose the solution on this basis
+      angle_match = np.sqrt((180 - abs(roll)) ** 2 + abs(pitch) ** 2)
+      # print('test', abs(roll % 360 - 180), roll, pitch, yaw)
+      # print('test2', abs(pitch))
+
+      if angle_match < chosen_angle_match and reproj_error < self.reproj_error_threshold:
+        chosen_rvec, chosen_tvec = rvec, tvec
+        chosen_quat = quaternion
+        chosen_roll, chosen_pitch, chosen_yaw = roll, pitch, yaw
+        chosen_angle_match = angle_match
+
+    return chosen_rvec, chosen_tvec, chosen_quat, chosen_roll, chosen_pitch, chosen_yaw
+  
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
 

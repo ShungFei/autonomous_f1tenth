@@ -22,10 +22,10 @@ def locate_arucos(image: np.ndarray, aruco_dictionary, marker_obj_points, intrin
     for id, marker in zip(all_marker_ids, all_marker_corners):
         # tvec contains position of marker in camera frame
         if output_all:
-          _, rvecs, tvecs, reproj_error = cv2.solvePnPGeneric(marker_obj_points, marker, 
+          _, rvecs, tvecs, reproj_errors = cv2.solvePnPGeneric(marker_obj_points, marker, 
                   new_intrinsics, None, flags=cv2.SOLVEPNP_IPPE_SQUARE)
         
-          arucos[id[0]] = (rvecs, tvecs, reproj_error)
+          arucos[id[0]] = (rvecs, tvecs, reproj_errors)
         else:
           _, rvec, tvec = cv2.solvePnP(marker_obj_points, marker, 
                   new_intrinsics, None, flags=cv2.SOLVEPNP_IPPE_SQUARE)

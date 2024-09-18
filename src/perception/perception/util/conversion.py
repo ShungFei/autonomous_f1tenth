@@ -1,4 +1,5 @@
 import numpy as np
+from sympy import deg
 from std_msgs.msg import Header
 from rosgraph_msgs.msg import Clock
 from rclpy.clock import Clock as ROSClock
@@ -16,7 +17,7 @@ def get_euler_from_quaternion(qx, qy, qz, qw, degrees=False, positive=False):
   """
 
   rotation = Rotation.from_quat([qx, qy, qz, qw])
-  roll, pitch, yaw = rotation.as_euler('xyz')
+  roll, pitch, yaw = rotation.as_euler('xyz', degrees=degrees)
   
   return roll, pitch, yaw
 
@@ -31,7 +32,7 @@ def get_euler_from_rotation_matrix(R, degrees=False):
         :return roll, pitch, yaw: The roll, pitch, and yaw angles in radians
     """
     rotation = Rotation.from_matrix(R)
-    roll, pitch, yaw = rotation.as_euler('xyz')
+    roll, pitch, yaw = rotation.as_euler('xyz', degrees=degrees)
 
     return roll, pitch, yaw
 

@@ -1,36 +1,51 @@
 import cv2
 import numpy as np
-  
-def locate_arucos(image: np.ndarray, aruco_dictionary, marker_obj_points, intrinsics, dist_coeffs, output_all=False) -> dict[int, tuple[np.ndarray, np.ndarray]]:
+
+def locate_aruco_corners(image: np.ndarray, aruco_dictionary) -> tuple[np.ndarray, np.ndarray]:
     """
-    Returns a dictionary of detected ArUco markers and their poses
+    Returns the detected ArUco corners and IDs
     """
     # Add subpixel refinement to marker detector
     detector_params = cv2.aruco.DetectorParameters()
     detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+    detector_params.cornerRefinementWinSize = 3
+    detector_params.cornerRefinementMaxIterations = 9999999
+    detector_params.cornerRefinementMinAccuracy = 0.01
 
-    new_intrinsics, _ = cv2.getOptimalNewCameraMatrix(intrinsics, dist_coeffs, image.shape[:2][::-1], 1)
-    undistorted_image = cv2.undistort(image, intrinsics, dist_coeffs, None, new_intrinsics)
-    
     all_marker_corners, all_marker_ids, _ = cv2.aruco.detectMarkers(
-      image = undistorted_image,
+      image = image,
       parameters = detector_params,
       dictionary = aruco_dictionary)
     all_marker_ids = all_marker_ids if all_marker_ids is not None else []
     arucos = {}
-
     for id, marker in zip(all_marker_ids, all_marker_corners):
+      arucos[id[0]] = marker
+    
+    return arucos
+
+def locate_aruco_poses(image: np.ndarray, aruco_dictionary, marker_obj_points, intrinsics, dist_coeffs, output_all=False) -> dict[int, tuple[np.ndarray, np.ndarray]]:
+    """
+    Returns a dictionary of detected ArUco markers and their poses
+    """
+    # Keep all of the original image by setting the alpha to 1
+    # new_intrinsics, _ = cv2.getOptimalNewCameraMatrix(intrinsics, dist_coeffs, image.shape[:2][::-1], alpha=1)
+    undistorted_image = cv2.undistort(image, intrinsics, dist_coeffs, None, None)
+    
+    aruco_corners = locate_aruco_corners(undistorted_image, aruco_dictionary)
+    aruco_poses = {}
+
+    for id, marker in aruco_corners.items():
         # tvec contains position of marker in camera frame
         if output_all:
           _, rvecs, tvecs, reproj_errors = cv2.solvePnPGeneric(marker_obj_points, marker, 
-                  new_intrinsics, None, flags=cv2.SOLVEPNP_IPPE_SQUARE)
+                  intrinsics, None, flags=cv2.SOLVEPNP_IPPE_SQUARE)
         
-          arucos[id[0]] = (rvecs, tvecs, reproj_errors)
+          aruco_poses[id] = (rvecs, tvecs, reproj_errors)
         else:
           _, rvec, tvec = cv2.solvePnP(marker_obj_points, marker, 
-                  new_intrinsics, None, flags=cv2.SOLVEPNP_IPPE_SQUARE)
+                  intrinsics, None, flags=cv2.SOLVEPNP_IPPE_SQUARE)
 
           # TODO: handle multiple markers of the same ID
-          arucos[id[0]] = (rvec, tvec)
+          aruco_poses[id] = (rvec, tvec)
 
-    return arucos
+    return aruco_poses

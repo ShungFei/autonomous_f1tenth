@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 import pandas as pd
 from sympy import N
-from perception.util.aruco import locate_arucos
+from perception.util.aruco import locate_aruco_poses
 from perception.util.conversion import get_quaternion_from_rodrigues
 
 class TrackingProcessor():
@@ -61,7 +61,7 @@ class TrackingProcessor():
         if (image_file.endswith(".png") or image_file.endswith(".jpg") or image_file.endswith(".jpeg")):
           # Load the images
           image = cv2.imread(f"{process_sub_dir}/{image_file}")
-          arucos = locate_arucos(image, self.aruco_dictionary, self.marker_obj_points, intrinsics, dist_coeffs)
+          arucos = locate_aruco_poses(image, self.aruco_dictionary, self.marker_obj_points, intrinsics, dist_coeffs)
           if self.opp_back_aruco_id not in arucos:
             opp_rel_poses.append((image_file.strip(".png"), *([None] * 10)))
           

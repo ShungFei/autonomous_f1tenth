@@ -41,6 +41,8 @@ class BevTracker(Node):
     self.node_name = self.declare_parameter('node_name', "bev").get_parameter_value().string_value
     self.debug = self.declare_parameter('debug', False).get_parameter_value().bool_value
     self.fps = self.declare_parameter('fps', 60).get_parameter_value().integer_value
+    self.exposure = self.declare_parameter('exposure', 30).get_parameter_value().integer_value
+    self.gain = self.declare_parameter('gain', 55).get_parameter_value().integer_value
     self.side_length = self.declare_parameter('side_length', 0.15).get_parameter_value().double_value
 
     self.right_camera_info_sub = self.create_subscription(
@@ -76,6 +78,7 @@ class BevTracker(Node):
     self.bridge = CvBridge()
 
     self.zed = sl.Camera()
+    
     self.runtime_parameters = sl.RuntimeParameters()
 
     # Create a InitParameters object and set configuration parameters
@@ -88,6 +91,9 @@ class BevTracker(Node):
 
     # Open the camera
     err = self.zed.open(init_params)
+    self.zed.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, self.exposure)
+    self.zed.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, self.gain)
+
     if err != sl.ERROR_CODE.SUCCESS:
         print("Camera Open : "+repr(err)+". Exit program.")
         exit()

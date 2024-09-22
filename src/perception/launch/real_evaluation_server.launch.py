@@ -34,7 +34,8 @@ def spawn_func(context, *args, **kwargs):
     opponent_name = LaunchConfiguration("opponent_name").perform(context)
     fps = int(LaunchConfiguration("fps").perform(context))
     side_length = float(LaunchConfiguration("side_length").perform(context))
-
+    exposure = int(LaunchConfiguration("exposure").perform(context))
+    gain = int(LaunchConfiguration("gain").perform(context))
     debug = LaunchConfiguration("debug").perform(context).lower() == "true"
     eval_time = float(LaunchConfiguration("eval_time").perform(context))
 
@@ -105,6 +106,8 @@ def spawn_func(context, *args, **kwargs):
                 "camera_name": bev_camera_name,
                 "debug": debug,
                 "fps": fps,
+                "exposure": exposure,
+                "gain": gain,
                 "side_length": side_length,
                 "debug_dir": debug_dir,
             }   
@@ -157,6 +160,14 @@ def generate_launch_description():
     fps_arg = DeclareLaunchArgument(
         name="fps", description="frames per second", default_value="60"
     )
+    
+    exposure_arg = DeclareLaunchArgument(
+        name="exposure", description="exposure value", default_value="30"
+    )
+
+    gain_arg = DeclareLaunchArgument(
+        name="gain", description="gain value", default_value="45"
+    )
 
     side_length_arg = DeclareLaunchArgument(
         name="side_length", description="side length of the ArUco marker", default_value="0.15"
@@ -178,6 +189,8 @@ def generate_launch_description():
             fps_arg,
             side_length_arg,
             debug_arg,
+            exposure_arg,
+            gain_arg,
             eval_time_arg,
             bev_camera_name_arg,
             opponent_name_arg,       

@@ -165,14 +165,12 @@ class BEVProcessor():
           # Load the images
           image = cv2.imread(f"{process_sub_dir}/{image_file}")
           aruco_poses = locate_aruco_poses(image, self.aruco_dictionary, self.marker_obj_points, intrinsics, dist_coeffs, output_all=True)
-          print('\n'+ image_file)
           if self.ego_aruco_id not in aruco_poses:
             ego_poses.append((image_file.strip(".png"), *([None] * 10)))
           else:
             rvecs, tvecs, reproj_errors = aruco_poses[self.ego_aruco_id]
             rvec, tvec, quat, roll, pitch, yaw = self.select_best_pnp_pose(rvecs, tvecs, reproj_errors)
 
-            print(self.ego_aruco_id, tvec)
             # print(f"rvec: {rvec}, tvec: {tvec}, quat: {quat}, roll: {roll}, pitch: {pitch}, yaw: {yaw}")
 
             ego_poses.append((image_file.strip(".png"), *quat, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
@@ -181,7 +179,6 @@ class BEVProcessor():
             opp_poses.append((image_file.strip(".png"), *([None] * 10)))
           else:
             rvec, tvec, quat, roll, pitch, yaw = self.select_best_pnp_pose(*aruco_poses[self.opp_aruco_id])
-            print(self.opp_aruco_id, tvec)
             opp_poses.append((image_file.strip(".png"), *quat, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
       
       # Save the poses to csv files
@@ -255,4 +252,4 @@ if __name__ == "__main__":
       print(f"Directory {args.run_dir} does not exist")
       exit()
     node = BEVProcessor(args.run_dir, side_length=args.side_length, ego_aruco_id=args.ego_aruco_id, opp_aruco_id=args.opp_aruco_id)
-    node.process_stereo()
+    node.process()

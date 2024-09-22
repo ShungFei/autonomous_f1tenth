@@ -18,7 +18,7 @@ import pyzed.sl as sl
 
 import perception.util.ground_truth as GroundTruth
 from perception.util.conversion import get_time_from_header, get_time_from_rosclock, get_quaternion_from_rotation_matrix
-from perception.util.aruco import locate_arucos
+from perception.util.aruco import locate_aruco_poses
 
 class BevTracker(Node):
   """
@@ -175,7 +175,7 @@ class BevTracker(Node):
     """
     if len(self.image_queue) > 0:
       curr_time, prev_time_capture, image_np = self.image_queue.popleft()
-      arucos = locate_arucos(image_np, self.aruco_dictionary, self.marker_obj_points, self.right_intrinsics, self.right_dist_coeffs)
+      arucos = locate_aruco_poses(image_np, self.aruco_dictionary, self.marker_obj_points, self.right_intrinsics, self.right_dist_coeffs)
 
       self.measurements[curr_time] = arucos
       print(curr_time - prev_time_capture) #curr_time - self.prev_time_process
@@ -189,7 +189,7 @@ class BevTracker(Node):
     """
     curr_time = get_time_from_header(image_msg.header)
     current_frame = self.bridge.imgmsg_to_cv2(image_msg)
-    arucos = locate_arucos(current_frame, self.aruco_dictionary,
+    arucos = locate_aruco_poses(current_frame, self.aruco_dictionary,
                            self.marker_obj_points, self.right_intrinsics, self.right_dist_coeffs)
 
     print(curr_time)

@@ -161,7 +161,7 @@ class Evaluation(Node):
 
   def agent_pose_callback(self, data: TFMessage):
     """
-    Callback function for the agent's pose
+    Callback function for the agent's pose (simulation only)
 
     This publishes the 3D world position (x,y,z) of the camera on the agent vehicle
     """
@@ -178,7 +178,7 @@ class Evaluation(Node):
   
   def opponent_pose_callback(self, data: TFMessage):
     """
-    Callback function for the opponent's pose
+    Callback function for the opponent's pose (simulation only)
 
     This publishes the 3D world position (x,y,z) of the ArUco marker on the opponent vehicle
     """

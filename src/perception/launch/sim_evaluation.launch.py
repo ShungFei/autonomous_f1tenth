@@ -102,6 +102,7 @@ def monocular_nodes(name, camera_name, opponent_name, eval_time, debug_dir, debu
                     "camera_name": camera_name,
                     "opponent_name": opponent_name,
                     "debug": debug,
+                    "is_sim": True,
                     "debug_dir": debug_dir,
                 }
             ],
@@ -186,8 +187,27 @@ def spawn_func(context, *args, **kwargs):
         emulate_tty=True,
     )
 
+    evaluation_node = Node(
+        package="perception",
+        executable="evaluation",
+        name="evaluation",
+        output="screen",
+        parameters=[
+            {
+                "agent_name": name,
+                "camera_name": camera_name if is_stereo == "false" else stereo_camera_name,
+                "opponent_name": opponent_name,
+                "eval_time": eval_time,
+                "is_stereo": is_stereo == "true",
+                "debug": debug,
+            }
+        ],
+        emulate_tty=True,
+    )
+
     return [
         gz_sim,
+        evaluation_node,
         *spawn_model_from_xacro(
             xacro_file,
             name,

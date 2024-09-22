@@ -53,32 +53,47 @@ def get_rotation_matrix_from_quaternion(qx, qy, qz, qw):
   ])
   return R
 
-def get_quaternion_from_euler(roll, pitch, yaw, degrees=False):
+def get_rotation_matrix_from_euler(roll, pitch, yaw, degrees=False):
     """
-    Convert an Euler angle to a quaternion.
-    
+    Convert an Euler angle to a rotation matrix. (XYZ extrinsic rotation)
+        
     Input
         :param roll, pitch, yaw: The roll, pitch, and yaw angles in radians
-    
+        
+    Output
+        :return R: The rotation matrix
+    """
+    rotation = Rotation.from_euler('xyz', [roll, pitch, yaw], degrees=degrees)
+    R = rotation.as_matrix()
+    return R
+
+def get_quaternion_from_euler(roll, pitch, yaw, degrees=False):
+    """
+    Convert an Euler angle to a quaternion. (XYZ extrinsic rotation)
+        
+    Input
+        :param roll, pitch, yaw: The roll, pitch, and yaw angles in radians
+        
     Output
         :return qx, qy, qz, qw: The orientation in quaternion [x,y,z,w] format
     """
-    if degrees:
-        roll, pitch, yaw = np.radians(roll), np.radians(pitch), np.radians(yaw)
-    
-    cy = np.cos(yaw * 0.5)
-    sy = np.sin(yaw * 0.5)
-    cp = np.cos(pitch * 0.5)
-    sp = np.sin(pitch * 0.5)
-    cr = np.cos(roll * 0.5)
-    sr = np.sin(roll * 0.5)
-
-    qw = cr * cp * cy + sr * sp * sy
-    qx = sr * cp * cy - cr * sp * sy
-    qy = cr * sp * cy + sr * cp * sy
-    qz = cr * cp * sy - sr * sp * cy
-
+    rotation = Rotation.from_euler('xyz', [roll, pitch, yaw], degrees=degrees)
+    qx, qy, qz, qw = rotation.as_quat()
     return qx, qy, qz, qw
+
+def get_rodrigues_from_euler(roll, pitch, yaw, degrees=False):
+    """
+    Convert an Euler angle to a Rodrigues vector. (XYZ extrinsic rotation)
+        
+    Input
+        :param roll, pitch, yaw: The roll, pitch, and yaw angles in radians
+        
+    Output
+        :return rvec: The Rodrigues vector
+    """
+    rotation = Rotation.from_euler('xyz', [roll, pitch, yaw], degrees=degrees)
+    rvec = rotation.as_rotvec()
+    return rvec
 
 def quaternion_conj(qx, qy, qz, qw):
   return np.array([-qx, -qy, -qz, qw]) / np.linalg.norm([qx, qy, qz, qw])

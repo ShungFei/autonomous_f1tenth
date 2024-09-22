@@ -11,7 +11,7 @@ from collections import deque
 import cv2
 import pyrealsense2 as rs
 from queue import Queue
-from perception.util.aruco import locate_arucos
+from perception.util.aruco import locate_aruco_poses
 
 import os
 import numpy as np
@@ -52,6 +52,7 @@ class CarLocalizer(Node):
     self.auto_exposure = self.declare_parameter('auto_exposure', False).get_parameter_value().bool_value
     self.exposure_time = self.declare_parameter('exposure_time', 50).get_parameter_value().integer_value
     self.gain = self.declare_parameter('gain', 128).get_parameter_value().integer_value
+    self.is_sim = self.declare_parameter('is_sim', False).get_parameter_value().bool_value
 
     self.get_logger().info(f"Subscribing to {self.agent_name}")
 
@@ -63,7 +64,8 @@ class CarLocalizer(Node):
         f'{self.agent_name}/{self.camera_name}/{self.SELECTED_CAMERA}/image_raw', 
         lambda data: self.image_callback(self.SELECTED_CAMERA, data), 
         10)
-      
+    
+    # This is used one time to get the camera parameters in simulation
     self.color_camera_info_sub = self.create_subscription(
       CameraInfo, 
       f'{self.agent_name}/{self.camera_name}/{self.SELECTED_CAMERA}/camera_info', 
@@ -121,69 +123,69 @@ class CarLocalizer(Node):
     self.previous_pose_time = self.previous_image_time
 
     ## === USING THE PYREALSENSE2 API INSTEAD OF ROS2 WRAPPER === ##
+    if not self.is_sim:
+      # Configure depth and color streams
+      self.pipeline = rs.pipeline()
+      self.config = rs.config()
 
-    # Configure depth and color streams
-    self.pipeline = rs.pipeline()
-    self.config = rs.config()
+      # Get device product line for setting a supporting resolution
+      pipeline_wrapper = rs.pipeline_wrapper(self.pipeline)
+      pipeline_profile = self.config.resolve(pipeline_wrapper)
+      device = pipeline_profile.get_device()
 
-    # Get device product line for setting a supporting resolution
-    pipeline_wrapper = rs.pipeline_wrapper(self.pipeline)
-    pipeline_profile = self.config.resolve(pipeline_wrapper)
-    device = pipeline_profile.get_device()
+      found_rgb = False
+      for s in device.sensors:
+          if s.get_info(rs.camera_info.name) == 'RGB Camera':
+              found_rgb = True
+              break
+      if not found_rgb:
+          print("The demo requires Depth camera with Color sensor")
+          exit(0)
 
-    found_rgb = False
-    for s in device.sensors:
-        if s.get_info(rs.camera_info.name) == 'RGB Camera':
-            found_rgb = True
-            break
-    if not found_rgb:
-        print("The demo requires Depth camera with Color sensor")
-        exit(0)
+      self.config.enable_stream(rs.stream.color, 1920, 1080, rs.format.bgr8, 30)
+      self.config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
 
-    self.config.enable_stream(rs.stream.color, 1920, 1080, rs.format.bgr8, 30)
-    self.config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
+      # Start streaming
+      cfg = self.pipeline.start(self.config)
+      color_profile = cfg.get_stream(rs.stream.color)
+      color_intr = color_profile.as_video_stream_profile().get_intrinsics() 
 
-    # Start streaming
-    cfg = self.pipeline.start(self.config)
-    color_profile = cfg.get_stream(rs.stream.color)
-    color_intr = color_profile.as_video_stream_profile().get_intrinsics() 
+      self.color_intrinsics = np.array([
+          [color_intr.fx, 0, color_intr.ppx],
+          [0, color_intr.fy, color_intr.ppy],
+          [0, 0, 1]
+      ])
+      self.color_dist_coeffs = np.array(color_intr.coeffs)
+      
+      depth_profile = cfg.get_stream(rs.stream.depth)
+      depth_intr = depth_profile.as_video_stream_profile().get_intrinsics()
 
-    self.color_intrinsics = np.array([
-        [color_intr.fx, 0, color_intr.ppx],
-        [0, color_intr.fy, color_intr.ppy],
-        [0, 0, 1]
-    ])
-    self.color_dist_coeffs = np.array(color_intr.coeffs)
-    
-    depth_profile = cfg.get_stream(rs.stream.depth)
-    depth_intr = depth_profile.as_video_stream_profile().get_intrinsics()
+      self.depth_intrinsics = np.array([
+          [depth_intr.fx, 0, depth_intr.ppx],
+          [0, depth_intr.fy, depth_intr.ppy],
+          [0, 0, 1]
+      ])
+      self.depth_dist_coeffs = np.array(depth_intr.coeffs)
+      
+      # Get depth scale
+      depth_sensor = cfg.get_device().first_depth_sensor()
+      color_sensor = cfg.get_device().first_color_sensor()
 
-    self.depth_intrinsics = np.array([
-        [depth_intr.fx, 0, depth_intr.ppx],
-        [0, depth_intr.fy, depth_intr.ppy],
-        [0, 0, 1]
-    ])
-    self.depth_dist_coeffs = np.array(depth_intr.coeffs)
-    
-    # Get depth scale
-    depth_sensor = cfg.get_device().first_depth_sensor()
-    color_sensor = cfg.get_device().first_color_sensor()
+      color_sensor.set_option(rs.option.enable_auto_exposure, 1 if self.auto_exposure else 0)
+      color_sensor.set_option(rs.option.exposure, self.exposure_time)
+      color_sensor.set_option(rs.option.gain, self.gain)
 
-    color_sensor.set_option(rs.option.enable_auto_exposure, 1 if self.auto_exposure else 0)
-    color_sensor.set_option(rs.option.exposure, self.exposure_time)
-    color_sensor.set_option(rs.option.gain, self.gain)
+      self.depth_scale = depth_sensor.get_depth_scale()
 
-    self.depth_scale = depth_sensor.get_depth_scale()
+      print("Color Intrinsics: ", self.color_intrinsics)
+      print("Depth Intrinsics: ", self.depth_intrinsics)
+      print("Color Distortion Coefficients: ", self.color_dist_coeffs)
+      print("Depth Distortion Coefficients: ", self.depth_dist_coeffs)
+      print("Depth Scale: ", self.depth_scale)
 
-    print("Color Intrinsics: ", self.color_intrinsics)
-    print("Depth Intrinsics: ", self.depth_intrinsics)
-    print("Color Distortion Coefficients: ", self.color_dist_coeffs)
-    print("Depth Distortion Coefficients: ", self.depth_dist_coeffs)
-    print("Depth Scale: ", self.depth_scale)
-
-    self.image_queue = deque()
-    self.euler_window = []
-    self.create_timer(1/30, self.rs_pose_pub_callback)
+      self.image_queue = deque()
+      self.euler_window = []
+      self.create_timer(1/30, self.rs_pose_pub_callback)
 
   def destroy_node(self):
     if self.debug == True:
@@ -257,7 +259,7 @@ class CarLocalizer(Node):
     """
     current_time = 1e9 * image.header.stamp.sec + image.header.stamp.nanosec
     image_np = self.bridge.imgmsg_to_cv2(image, desired_encoding="bgr8")
-    arucos = locate_arucos(image_np, self.aruco_dictionary, self.marker_obj_points, self.color_intrinsics, self.color_dist_coeffs)
+    arucos = locate_aruco_poses(image_np, self.aruco_dictionary, self.marker_obj_points, self.color_intrinsics, self.color_dist_coeffs)
 
     if len(arucos) > 0:
       if self.opp_back_marker_id in arucos:
@@ -285,33 +287,6 @@ class CarLocalizer(Node):
     # Only need the camera parameters once (assuming no change)
     self.destroy_subscription(self.color_camera_info_sub)
   
-  def locate_aruco(self, image: np.ndarray, bgr: bool=True):
-    # probably unnecessary
-    # if bgr:
-    #   image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-    # Add subpixel refinement to marker detector
-    detector_params = cv2.aruco.DetectorParameters()
-    detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-
-    marker_corners, marker_ids, _ = cv2.aruco.detectMarkers(
-      image = image,
-      parameters = detector_params,
-      dictionary = self.aruco_dictionary)
-    if len(marker_corners) > 0:
-      # tvec contains position of marker in camera frame
-      _, rvec, tvec = cv2.solvePnP(self.marker_obj_points, marker_corners[0], 
-                         self.color_intrinsics, 0, flags=cv2.SOLVEPNP_IPPE_SQUARE)
-      
-      if self.debug == True:
-        print('corners', marker_corners[0])
-        print('rvec', rvec)
-        print('tvec', tvec)
-        print('distance', sqrt(np.sum((tvec)**2)))
-      return rvec, tvec
-    else:
-      return None, None
-
   def image_callback(self, selected_camera: str, data: Image):
     """
     Callback function for images from the camera

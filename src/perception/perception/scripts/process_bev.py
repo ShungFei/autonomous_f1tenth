@@ -63,6 +63,7 @@ class BEVProcessor():
       left_dist_coeffs = np.loadtxt(f"{process_sub_dir}/left/dist_coeffs.txt")
 
       extrinsics = np.loadtxt(f"{process_sub_dir}/extrinsics.txt")[:-1]
+      print('extrinsics', extrinsics)
       # convert the translation vector to metres
       extrinsics[:, 3] /= 1000
 
@@ -81,8 +82,8 @@ class BEVProcessor():
           left_new_intrinsics, _ = cv2.getOptimalNewCameraMatrix(left_intrinsics, left_dist_coeffs, left_image.shape[:2][::-1], alpha=1)
           right_new_intrinsics, _ = cv2.getOptimalNewCameraMatrix(right_intrinsics, right_dist_coeffs, right_image.shape[:2][::-1], alpha=1)
           
-          undistorted_left_image = cv2.undistort(left_image, left_intrinsics, left_dist_coeffs, None, newCameraMatrix=None)
-          undistorted_right_image = cv2.undistort(right_image, right_intrinsics, right_dist_coeffs, None, newCameraMatrix=None)
+          undistorted_left_image = cv2.undistort(left_image, left_intrinsics, left_dist_coeffs, None, newCameraMatrix=left_intrinsics)
+          undistorted_right_image = cv2.undistort(right_image, right_intrinsics, right_dist_coeffs, None, newCameraMatrix=right_intrinsics)
           
           undistorted_left_gray_image = cv2.cvtColor(undistorted_left_image, cv2.COLOR_BGR2GRAY)
           undistorted_right_gray_image = cv2.cvtColor(undistorted_right_image, cv2.COLOR_BGR2GRAY)
@@ -91,10 +92,10 @@ class BEVProcessor():
           right_arucos = locate_aruco_corners(undistorted_right_image, self.aruco_dictionary)
           print('right arucos', right_arucos)
           # apply subpixel refinement to the detected corners
-          for aruco_id in left_arucos:
-            left_arucos[aruco_id] = cv2.cornerSubPix(undistorted_left_gray_image, left_arucos[aruco_id], (1, 1), (-1, -1), self.term_criteria)
-          for aruco_id in right_arucos:
-            right_arucos[aruco_id] = cv2.cornerSubPix(undistorted_right_gray_image, right_arucos[aruco_id], (1, 1), (-1, -1), self.term_criteria)
+          # for aruco_id in left_arucos:
+          #   left_arucos[aruco_id] = cv2.cornerSubPix(undistorted_left_gray_image, left_arucos[aruco_id], (1, 1), (-1, -1), self.term_criteria)
+          # for aruco_id in right_arucos:
+          #   right_arucos[aruco_id] = cv2.cornerSubPix(undistorted_right_gray_image, right_arucos[aruco_id], (1, 1), (-1, -1), self.term_criteria)
           # invert extrinsics
           rot_inv = extrinsics[:, :3].T
           extrinsics_inv = np.concatenate([rot_inv, rot_inv @ -extrinsics[:, 3].reshape(3,-1)], axis = -1)
@@ -133,12 +134,12 @@ class BEVProcessor():
             # _, rvec_left, tvec_left = cv2.solvePnP(self.marker_obj_points, left_marker[0], left_intrinsics, None, flags=cv2.SOLVEPNP_IPPE_SQUARE)
 
             # print('right pnp', [extrinsics @ np.vstack([tvec, 1]) for tvec in tvecs])
-            print('right pnp', tvecs)
-            # print(extrinsics[:, :3],extrinsics[:, 3], extrinsics[:, 3].reshape(-1,3), (tvecs_left[0] - extrinsics[:, 3]) )
+            print('right pnp (right frame)', tvecs)
+            # print(extrinsics[:, :3],extrinsics[:, 3], extrinsics[:, 3].reshape(-1,3), (tvecs_left[0] - extrinsics[:, 3]))
 
             # transform the points to the right camera coordinate system
-            # print('left pnp', tvecs_left)
-            print('left pnp', [(extrinsics[:, :3].T @ (tvec_left - extrinsics[:, 3].reshape(3,-1))) for tvec_left in tvecs_left])
+            print('left pnp (left frame)', tvecs_left)
+            print('left pnp (right frame)', [(extrinsics[:, :3].T @ (tvec_left - extrinsics[:, 3].reshape(3,-1))) for tvec_left in tvecs_left])
 
   def process(self):
     for process_sub_dir, _, _ in os.walk(self.process_dir):

@@ -161,11 +161,14 @@ class BEVProcessor():
       opp_poses = []
 
       for image_file in sorted(image_files):
+        # if image_file != '1727603151901157814.png':
+        #   continue
         # check if the image ends with png or jpg or jpeg
         if (image_file.endswith(".png") or image_file.endswith(".jpg") or image_file.endswith(".jpeg")):
           # Load the images
           image = cv2.imread(f"{process_sub_dir}/{image_file}")
           aruco_poses = locate_aruco_poses(image, self.aruco_dictionary, self.marker_obj_points, intrinsics, dist_coeffs, output_all=True)
+          # print(aruco_poses)
           if self.ego_aruco_id not in aruco_poses:
             ego_poses.append((image_file.strip(".png"), *([None] * 10)))
           else:
@@ -173,13 +176,14 @@ class BEVProcessor():
             rvec, tvec, quat, roll, pitch, yaw = self.select_best_pnp_pose(rvecs, tvecs, reproj_errors)
 
             # print(f"rvec: {rvec}, tvec: {tvec}, quat: {quat}, roll: {roll}, pitch: {pitch}, yaw: {yaw}")
-
             ego_poses.append((image_file.strip(".png"), *quat, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
           
           if self.opp_aruco_id not in aruco_poses:
             opp_poses.append((image_file.strip(".png"), *([None] * 10)))
           else:
-            rvec, tvec, quat, roll, pitch, yaw = self.select_best_pnp_pose(*aruco_poses[self.opp_aruco_id])
+            rvecs, tvecs, reproj_errors = aruco_poses[self.opp_aruco_id]
+
+            rvec, tvec, quat, roll, pitch, yaw = self.select_best_pnp_pose(rvecs, tvecs, reproj_errors)
             opp_poses.append((image_file.strip(".png"), *quat, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
       
       # Save the poses to csv files

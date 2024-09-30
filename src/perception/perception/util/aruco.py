@@ -36,7 +36,7 @@ def locate_aruco_poses(image: np.ndarray, aruco_dictionary, marker_obj_points, i
     Returns a dictionary of detected ArUco markers and their poses
     """
     # Keep all of the original image by setting the alpha to 1
-    new_intrinsics, _ = cv2.getOptimalNewCameraMatrix(intrinsics, dist_coeffs, image.shape[:2][::-1], alpha=1)
+    new_intrinsics, _ = cv2.getOptimalNewCameraMatrix(intrinsics, dist_coeffs, (image.shape[1], image.shape[0]), alpha=1)
     undistorted_image = cv2.undistort(image, intrinsics, dist_coeffs, None, newCameraMatrix=new_intrinsics)
     # cv2.imwrite("undistorted.png", undistorted_image)
     # cv2.imwrite("original.png", image)

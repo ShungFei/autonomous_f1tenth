@@ -1,50 +1,44 @@
-
-from datetime import datetime
 import numpy as np
 from filterpy.kalman import KalmanFilter
 from filterpy.common import Q_discrete_white_noise
 from scipy.linalg import block_diag
 
 import argparse
-import cv2
 import os
 import numpy as np
 import pandas as pd
-from math import sqrt
-import seaborn as sns
-from matplotlib import pyplot as plt
-from datetime import datetime
+from math import ceil
 
 from perception.util.conversion import get_euler_from_quaternion
 
 class StateEstimator():
-  def __init__(self, input_file, interval=1/30):
+  def __init__(self, input_file, frame_rate=30):
     self.input_file = input_file
-    self.interval = interval
+    self.frame_rate = frame_rate
 
-    self.measured_poses = pd.read_csv(self.input_file)
-    print(self.input_file)
-    print(self.measured_poses)
+    self.measured_poses = pd.read_csv(self.input_file).set_index("time")
 
     # Index is all potential time intervals between the first and last time in the measured poses
-    self.expected_times = np.linspace(self.measured_poses.iloc[0].time, self.measured_poses.iloc[-1].time, len(self.measured_poses))
+    expected_times_count = ceil((self.measured_poses.index[-1] - self.measured_poses.index[0]) / (1e9 / self.frame_rate))
+    end_time = self.measured_poses.index[0] + expected_times_count * (1e9 / self.frame_rate)
+    self.expected_times = np.linspace(self.measured_poses.index[0], end_time, expected_times_count + 1)
+
     self.state_estimates = pd.DataFrame(columns=["position_x", "position_y", "position_z", "linear_velocity_x", "linear_velocity_y", "linear_velocity_z", "linear_acceleration_x", "linear_acceleration_y", "linear_acceleration_z", "orientation_x", "orientation_y", "orientation_z", "angular_velocity_x", "angular_velocity_y", "angular_velocity_z", "angular_acceleration_x", "angular_acceleration_y", "angular_acceleration_z"], index=self.expected_times)
+    self.state_estimates.index.name = "time"
   
   def process_kalman_filter(self):
     # Initialize the Kalman filter with the first pose
-    self.initialize_kalman_filter(self.interval, pose=self.measured_poses.iloc[0])
+    self.initialize_kalman_filter(1 / self.frame_rate, pose=self.measured_poses.iloc[0])
 
     for expected_time in self.state_estimates.index:
       self.kf.predict()
 
-      try:
-        i = self.measured_poses.index.get_loc(expected_time, method="nearest", tolerance=self.interval / 2)
-        orientation = get_euler_from_quaternion(self.measured_poses.iloc[i].qx, self.measured_poses.iloc[i].qy, self.measured_poses.iloc[i].qz, self.measured_poses.iloc[i].qw)
-        pose = np.concatenate((self.measured_poses.iloc[i][["tx", "ty", "tz"]], orientation))
+      # Update the Kalman filter with the closest measured pose before the expected time (within the interval of one frame)
+      i = self.measured_poses.index.get_indexer([expected_time], method="ffill", tolerance=1e9 / self.frame_rate)[0]
+      if i != -1: # Skip the update step if there is no measured pose before the expected time
+        orientation = get_euler_from_quaternion(*self.measured_poses.iloc[i][["qx", "qy", "qz", "qw"]].values)
+        pose = np.concatenate((self.measured_poses.iloc[i][["tx", "ty", "tz"]].values, orientation))
         self.kf.update(pose)
-      except KeyError:
-        # Skip the update step if there is no measured pose close to the expected time
-        pass
 
       state_estimate = self.kf.x
       self.state_estimates.loc[expected_time] = state_estimate
@@ -132,17 +126,17 @@ if __name__ == "__main__":
     for run_dir in os.listdir(DEBUG_DIR):
       if os.path.isdir(run_dir):
         input_file = os.path.join(run_dir, "opp_rel_poses.csv")
-        node = StateEstimator(input_file, interval=1/args.frame_rate)
+        node = StateEstimator(input_file, frame_rate=args.frame_rate)
         node.process_kalman_filter()
   elif args.latest:
     latest_dir = max([f.path for f in os.scandir(DEBUG_DIR) if f.is_dir()], key=os.path.getmtime)
     input_file = os.path.join(latest_dir, "opp_rel_poses.csv")
-    node = StateEstimator(input_file, interval=1/args.frame_rate)
+    node = StateEstimator(input_file, frame_rate=args.frame_rate)
     node.process_kalman_filter()
   elif args.input:
     if not os.path.exists(args.input):
       print(f"The file {args.input} does not exist")
       exit()
-    node = StateEstimator(args.input, interval=1/args.frame_rate)
+    node = StateEstimator(args.input, frame_rate=args.frame_rate)
     node.process_kalman_filter()
   

@@ -12,48 +12,60 @@ from math import ceil
 from perception.util.conversion import get_euler_from_quaternion
 
 class StateEstimator():
-  def __init__(self, input_file, frame_rate=30):
-    self.input_file = input_file
+  def __init__(self, run_dir, frame_rate=30):
+    self.run_dir = run_dir
     self.frame_rate = frame_rate
-
-    self.measured_poses = pd.read_csv(self.input_file).set_index("time")
-
-    # Index is all potential time intervals between the first and last time in the measured poses
-    expected_times_count = ceil((self.measured_poses.index[-1] - self.measured_poses.index[0]) / (1e9 / self.frame_rate))
-    end_time = self.measured_poses.index[0] + expected_times_count * (1e9 / self.frame_rate)
-    self.expected_times = np.linspace(self.measured_poses.index[0], end_time, expected_times_count + 1)
-
-    self.state_estimates = pd.DataFrame(columns=["position_x", "position_y", "position_z", "linear_velocity_x", "linear_velocity_y", "linear_velocity_z", "linear_acceleration_x", "linear_acceleration_y", "linear_acceleration_z", "orientation_x", "orientation_y", "orientation_z", "angular_velocity_x", "angular_velocity_y", "angular_velocity_z", "angular_acceleration_x", "angular_acceleration_y", "angular_acceleration_z"], index=self.expected_times)
-    self.state_estimates.index.name = "time"
-  
+      
   def process_kalman_filter(self):
-    # Initialize the Kalman filter with the first pose
-    self.initialize_kalman_filter(1 / self.frame_rate, pose=self.measured_poses.iloc[0])
+    for process_sub_dir, _, _ in os.walk(self.run_dir):
+      print('Processing:', process_sub_dir)
 
-    for expected_time in self.state_estimates.index:
-      self.kf.predict()
+      if not os.path.exists(f"{process_sub_dir}/opp_rel_poses.csv"):
+        print(f"Skipping {process_sub_dir} as opp_rel_poses.csv is missing")
+        continue
 
-      # Update the Kalman filter with the closest measured pose before the expected time (within the interval of one frame)
-      i = self.measured_poses.index.get_indexer([expected_time], method="ffill", tolerance=1e9 / self.frame_rate)[0]
-      if i != -1: # Skip the update step if there is no measured pose before the expected time
-        orientation = get_euler_from_quaternion(*self.measured_poses.iloc[i][["qx", "qy", "qz", "qw"]].values)
-        pose = np.concatenate((self.measured_poses.iloc[i][["tx", "ty", "tz"]].values, orientation))
-        self.kf.update(pose)
+      measured_poses = pd.read_csv(f"{process_sub_dir}/opp_rel_poses.csv").set_index("time")
+      
 
-      state_estimate = self.kf.x
-      self.state_estimates.loc[expected_time] = state_estimate
+      # Index is all potential time intervals between the first and last time in the measured poses
+      expected_times_count = ceil((measured_poses.index[-1] - measured_poses.index[0]) / (1e9 / self.frame_rate))
+      end_time = measured_poses.index[0] + expected_times_count * (1e9 / self.frame_rate)
+      expected_times = np.linspace(measured_poses.index[0], end_time, expected_times_count + 1)
 
-    self.write_data()
+      state_estimates = pd.DataFrame(columns=["position_x", "position_y", "position_z",
+                                                    "linear_velocity_x", "linear_velocity_y", "linear_velocity_z",
+                                                    "linear_acceleration_x", "linear_acceleration_y", "linear_acceleration_z",
+                                                    "orientation_x", "orientation_y", "orientation_z",
+                                                    "angular_velocity_x", "angular_velocity_y", "angular_velocity_z",
+                                                    "angular_acceleration_x","angular_acceleration_y", "angular_acceleration_z"], index=expected_times)
+      state_estimates.index.name = "time"
+      # Initialize the Kalman filter with the first pose
+      kf = self.initialize_kalman_filter(1 / self.frame_rate, pose=measured_poses.iloc[0])
+
+      for expected_time in state_estimates.index:
+        kf.predict()
+
+        # Update the Kalman filter with the closest measured pose before the expected time (within the interval of one frame)
+        i = measured_poses.index.get_indexer([expected_time], method="ffill", tolerance=1e9 / self.frame_rate)[0]
+        if i != -1: # Skip the update step if there is no measured pose before the expected time
+          orientation = get_euler_from_quaternion(*measured_poses.iloc[i][["qx", "qy", "qz", "qw"]].values)
+          pose = np.concatenate((measured_poses.iloc[i][["tx", "ty", "tz"]].values, orientation))
+          kf.update(pose)
+
+        state_estimate = kf.x
+        state_estimates.loc[expected_time] = state_estimate
+
+      self.write_data(state_estimates, f"{process_sub_dir}/state_estimates.csv")
 
   def initialize_kalman_filter(self, dt, pose = np.zeros(6)):
-    self.kf = KalmanFilter(dim_x=18, dim_z=6)
+    kf = KalmanFilter(dim_x=18, dim_z=6)
 
     # State
-    self.kf.x = np.zeros(18)
-    self.kf.x[:3] = pose[:3]
-    self.kf.x[9:12] = pose[3:6]
+    kf.x = np.zeros(18)
+    kf.x[:3] = pose[:3]
+    kf.x[9:12] = pose[3:6]
     # State covariance
-    self.kf.P = np.diag([1, 1, 1, 2, 2, 2, 3, 3, 3, 1, 1, 1, 2, 2, 2, 3, 3, 3])
+    kf.P = np.diag([1, 1, 1, 2, 2, 2, 3, 3, 3, 1, 1, 1, 2, 2, 2, 3, 3, 3])
     # Process noise
     q = Q_discrete_white_noise(dim=3, dt=dt, var=0.05)
 
@@ -68,10 +80,10 @@ class StateEstimator():
                                 [0, 0, q[2, 0], 0, 0, q[2, 1], 0, 0, q[2, 2]],
                                 ])
 
-    self.kf.Q = block_diag(q_second_order, q_second_order)
+    kf.Q = block_diag(q_second_order, q_second_order)
     
     # Measurement noise
-    self.kf.R = np.eye(6) * 0.05
+    kf.R = np.eye(6) * 0.05
 
     # Transition matrix
     a_t = np.array([[1, 0, 0, dt, 0, 0, 0.5*dt**2, 0, 0],
@@ -85,14 +97,16 @@ class StateEstimator():
                     [0, 0, 0, 0, 0, 0, 0, 0, 1],
                     ])
   
-    self.kf.F = np.zeros((18, 18), dtype=a_t.dtype)
-    self.kf.F[:9, :9] = a_t
-    self.kf.F[9:, 9:] = a_t
+    kf.F = np.zeros((18, 18), dtype=a_t.dtype)
+    kf.F[:9, :9] = a_t
+    kf.F[9:, 9:] = a_t
 
     # Measurement matrix
-    self.kf.H = np.zeros((6, 18))
-    self.kf.H[:3, :3] = np.eye(3)
-    self.kf.H[3:, 9:12] = np.eye(3)
+    kf.H = np.zeros((6, 18))
+    kf.H[:3, :3] = np.eye(3)
+    kf.H[3:, 9:12] = np.eye(3)
+
+    return kf
 
   def process_velocity_rolling_window_regression(data, window_size):
     """
@@ -100,16 +114,14 @@ class StateEstimator():
     """
     pass
 
-  def write_data(self, output_file=None):
-    if output_file is None:
-      output_file = f"{self.input_file.strip('.csv')}_state_estimates.csv"
-    self.state_estimates.to_csv(output_file)
+  def write_data(self, state_estimates: pd.DataFrame, output_file: str):
+    state_estimates.to_csv(output_file)
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
 
   group = parser.add_mutually_exclusive_group(required=True)
-  group.add_argument("-i", "--input", type=str, help="Path to the input csv file containing poses over time")
+  group.add_argument("-r", "--run_dir", type=str, help="Path to the input file containing poses over time")
   group.add_argument("--latest", action="store_true", help="Process the relative opponent poses of the latest run in the perception_debug directory")
   group.add_argument("--all", action="store_true", help="Process the relative opponent poses of all runs in the perception_debug directory")
 
@@ -125,18 +137,16 @@ if __name__ == "__main__":
   if args.all:
     for run_dir in os.listdir(DEBUG_DIR):
       if os.path.isdir(run_dir):
-        input_file = os.path.join(run_dir, "opp_rel_poses.csv")
-        node = StateEstimator(input_file, frame_rate=args.frame_rate)
+        node = StateEstimator(run_dir, interval=1/args.frame_rate)
         node.process_kalman_filter()
   elif args.latest:
     latest_dir = max([f.path for f in os.scandir(DEBUG_DIR) if f.is_dir()], key=os.path.getmtime)
-    input_file = os.path.join(latest_dir, "opp_rel_poses.csv")
-    node = StateEstimator(input_file, frame_rate=args.frame_rate)
+    node = StateEstimator(latest_dir, interval=1/args.frame_rate)
     node.process_kalman_filter()
-  elif args.input:
-    if not os.path.exists(args.input):
-      print(f"The file {args.input} does not exist")
+  elif args.run_dir:
+    if not os.path.exists(args.run_dir):
+      print(f"The directory {args.run_dir} does not exist")
       exit()
-    node = StateEstimator(args.input, frame_rate=args.frame_rate)
+    node = StateEstimator(args.run_dir, frame_rate=args.frame_rate)
     node.process_kalman_filter()
   

@@ -47,7 +47,9 @@ class StateEstimator():
 
         # Update the Kalman filter with the closest measured pose before the expected time (within the interval of one frame)
         i = measured_poses.index.get_indexer([expected_time], method="ffill", tolerance=1e9 / self.frame_rate)[0]
-        if i != -1: # Skip the update step if there is no measured pose before the expected time
+        
+        # Skip the update step if there is no measured pose before the expected time
+        if i != -1 and not pd.isna(measured_poses.iloc[i][["qx", "qy", "qz", "qw", "tx", "ty", "tz"]]).any():
           orientation = get_euler_from_quaternion(*measured_poses.iloc[i][["qx", "qy", "qz", "qw"]].values)
           pose = np.concatenate((measured_poses.iloc[i][["tx", "ty", "tz"]].values, orientation))
           kf.update(pose)

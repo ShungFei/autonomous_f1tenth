@@ -177,11 +177,39 @@ class StateEstimator():
 
     return kf
 
-  def process_velocity_rolling_window_regression(data, window_size):
+  def process_velocity_rolling_window_regression(self, measured_poses: pd.DataFrame, window_size: int):
     """
-    Estimate position and velocity of the opponent using rolling window regression on the given pose data
+    Estimate velocity of the opponent using linear regression across a rolling window of poses
+    The position is taken from the linear regression line at the last time in the window
     """
-    pass
+
+    state_estimates = pd.DataFrame(columns=["position_x", "position_y", "position_z",
+                                            "orientation_x", "orientation_y", "orientation_z",
+                                            "linear_velocity_x", "linear_velocity_y", "linear_velocity_z",
+                                            "angular_velocity_x", "angular_velocity_y", "angular_velocity_z"], index=measured_poses.index)
+    state_estimates.index.name = "time"
+
+    # Remove NaN values from the measured poses
+    measured_poses = measured_poses.dropna(subset=["tx", "ty", "tz", "qx", "qy", "qz", "qw"])
+
+    # Convert the quaternions to euler angles
+    measured_poses[["orientation_x", "orientation_y", "orientation_z"]] = measured_poses[["qx", "qy", "qz", "qw"]].apply(
+                                                                              lambda x: get_euler_from_quaternion(*x), axis=1, result_type="expand")
+
+    for i in range(len(measured_poses) - window_size):
+      window = measured_poses.iloc[i:i+window_size]
+      time = window.index[-1]
+      
+      X = window.index.values.reshape(-1, 1)
+      y = window[["tx", "ty", "tz", "orientation_x", "orientation_y", "orientation_z"]].values
+
+      reg = LinearRegression().fit(X, y)
+      pose = reg.predict(np.array([[time]]))[0]
+      velocity = reg.coef_.flatten() * 1e9
+
+      state_estimates.loc[time] = np.concatenate((pose, velocity))
+
+    return state_estimates
 
   def write_data(self, state_estimates: pd.DataFrame, output_file: str):
     state_estimates.to_csv(output_file)

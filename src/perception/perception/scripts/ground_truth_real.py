@@ -176,7 +176,7 @@ def rotate_bev_frame_to_ego_cam_frame(bev_to_ego_top_marker_rvec, tvec, measurem
   # Here we assume that the camera is fixed with respect to the BEV camera 
   # (might have to tune this to get better matches since camera is sensitive to movement
   # TODO: make bev_to_ego_cam_rot a fixed global variable
-  ego_top_marker_to_bev_rot = cv2.Rodrigues(conv.get_rodrigues_from_euler(roll, -2, yaw, degrees=True))[0].T
+  ego_top_marker_to_bev_rot = cv2.Rodrigues(conv.get_rodrigues_from_euler(roll, pitch, yaw, degrees=True))[0].T
 
   # Alternatively, this assumes that the camera and the top marker are aligned by 90 degree rotations
   # ego_top_marker_to_bev_rot = cv2.Rodrigues(bev_to_ego_top_marker_rvec)[0].T
@@ -312,7 +312,7 @@ def generate_smoothed_data(poses_df: pd.DataFrame, func: Literal["savgol", "roll
   return poses_df
 
 def compute_relative_pose(ego_bev_df: pd.DataFrame, opp_bev_df: pd.DataFrame, measurements: GroundTruthMeasurements):
-  rel_poses = pd.DataFrame(columns=["time (sec)", "time_norm (sec)", "rel_x", "rel_y", "rel_z", "rel_roll", "rel_pitch", "rel_yaw"])
+  rel_poses = pd.DataFrame(columns=["time (sec)", "time_norm (sec)"])
 
   for i in range(len(ego_bev_df)):
     ego_top_marker_to_bev_rvec = ego_bev_df.iloc[i][["ax", "ay", "az"]].to_numpy()

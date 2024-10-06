@@ -2,6 +2,7 @@ import numpy as np
 from filterpy.kalman import KalmanFilter
 from filterpy.common import Q_discrete_white_noise
 from scipy.linalg import block_diag
+from sklearn.linear_model import LinearRegression
 
 import argparse
 import os
@@ -9,13 +10,15 @@ import numpy as np
 import pandas as pd
 from math import ceil
 
+from perception.scripts.ground_truth_real import stabilise_euler_angles
 from perception.util.conversion import get_euler_from_quaternion
 
 class StateEstimator():
-  def __init__(self, run_dir, method, frame_rate=30):
+  def __init__(self, run_dir, method, frame_rate=30, degrees=False):
     self.run_dir = run_dir
     self.method = method
     self.frame_rate = frame_rate
+    self.degrees = degrees
       
   def process(self):
     for process_sub_dir, _, _ in os.walk(self.run_dir):
@@ -25,7 +28,14 @@ class StateEstimator():
         print(f"Skipping {process_sub_dir} as opp_rel_poses.csv is missing")
         continue
 
-      measured_poses = pd.read_csv(f"{process_sub_dir}/opp_rel_poses.csv").set_index("time")
+      measured_poses = pd.read_csv(f"{process_sub_dir}/opp_rel_poses.csv")
+      
+      # get euler angles from quaternions and skip zero norm quaternions
+      measured_poses[["roll", "pitch", "yaw"]] = measured_poses[["qx", "qy", "qz", "qw"]].apply(
+        lambda x: get_euler_from_quaternion(*x, degrees=self.degrees) if np.linalg.norm(x) > 0 else np.nan, axis=1, result_type="expand")
+      # make the euler angles continuous
+      measured_poses = stabilise_euler_angles(measured_poses, ["roll", "pitch", "yaw"], degrees=self.degrees)
+      measured_poses.set_index("time", inplace=True)
       
       if self.method == "kalman_ca":
         state_estimates = self.process_kalman_filter(measured_poses, is_constant_velocity_model=False)
@@ -43,17 +53,17 @@ class StateEstimator():
     expected_times = np.linspace(measured_poses.index[0], end_time, expected_times_count + 1)
 
     if is_constant_velocity_model:
-      state_estimates = pd.DataFrame(columns=["position_x", "position_y", "position_z",
-                                                      "linear_velocity_x", "linear_velocity_y", "linear_velocity_z",
-                                                      "orientation_x", "orientation_y", "orientation_z",
-                                                      "angular_velocity_x", "angular_velocity_y", "angular_velocity_z"], index=expected_times)
+      state_estimates = pd.DataFrame(columns=["tx", "ty", "tz",
+                                              "vx", "vy", "vz",
+                                              "roll", "pitch", "yaw",
+                                              "vroll", "vpitch", "vyaw"], index=expected_times)
     else:
-      state_estimates = pd.DataFrame(columns=["position_x", "position_y", "position_z",
-                                                      "linear_velocity_x", "linear_velocity_y", "linear_velocity_z",
-                                                      "linear_acceleration_x", "linear_acceleration_y", "linear_acceleration_z",
-                                                      "orientation_x", "orientation_y", "orientation_z",
-                                                      "angular_velocity_x", "angular_velocity_y", "angular_velocity_z",
-                                                      "angular_acceleration_x","angular_acceleration_y", "angular_acceleration_z"], index=expected_times)
+      state_estimates = pd.DataFrame(columns=["tx", "ty", "tz",
+                                              "vx", "vy", "vz",
+                                              "ax", "ay", "az",
+                                              "roll", "pitch", "yaw",
+                                              "vroll", "vpitch", "vyaw",
+                                              "aroll","apitch", "ayaw"], index=expected_times)
     state_estimates.index.name = "time"
     
     # Initialize the Kalman filter with the first pose
@@ -69,8 +79,8 @@ class StateEstimator():
       i = measured_poses.index.get_indexer([expected_time], method="ffill", tolerance=1e9 / self.frame_rate)[0]
       
       # Skip the update step if there is no measured pose before the expected time
-      if i != -1 and not pd.isna(measured_poses.iloc[i][["qx", "qy", "qz", "qw", "tx", "ty", "tz"]]).any():
-        orientation = get_euler_from_quaternion(*measured_poses.iloc[i][["qx", "qy", "qz", "qw"]].values)
+      if i != -1 and not pd.isna(measured_poses.iloc[i][["qx", "qy", "qz", "qw", "tx", "ty", "tz", "roll", "pitch", "yaw"]]).any():
+        orientation = measured_poses.iloc[i][["roll", "pitch", "yaw"]].values
         pose = np.concatenate((measured_poses.iloc[i][["tx", "ty", "tz"]].values, orientation))
         kf.update(pose)
 
@@ -183,25 +193,21 @@ class StateEstimator():
     The position is taken from the linear regression line at the last time in the window
     """
 
-    state_estimates = pd.DataFrame(columns=["position_x", "position_y", "position_z",
-                                            "orientation_x", "orientation_y", "orientation_z",
-                                            "linear_velocity_x", "linear_velocity_y", "linear_velocity_z",
-                                            "angular_velocity_x", "angular_velocity_y", "angular_velocity_z"], index=measured_poses.index)
+    state_estimates = pd.DataFrame(columns=["tx", "ty", "tz",
+                                            "roll", "pitch", "yaw",
+                                            "vx", "vy", "vz",
+                                            "vroll", "vpitch", "vyaw"], index=measured_poses.index)
     state_estimates.index.name = "time"
 
     # Remove NaN values from the measured poses
     measured_poses = measured_poses.dropna(subset=["tx", "ty", "tz", "qx", "qy", "qz", "qw"])
-
-    # Convert the quaternions to euler angles
-    measured_poses[["orientation_x", "orientation_y", "orientation_z"]] = measured_poses[["qx", "qy", "qz", "qw"]].apply(
-                                                                              lambda x: get_euler_from_quaternion(*x), axis=1, result_type="expand")
 
     for i in range(len(measured_poses) - window_size):
       window = measured_poses.iloc[i:i+window_size]
       time = window.index[-1]
       
       X = window.index.values.reshape(-1, 1)
-      y = window[["tx", "ty", "tz", "orientation_x", "orientation_y", "orientation_z"]].values
+      y = window[["tx", "ty", "tz", "roll", "pitch", "yaw"]].values
 
       reg = LinearRegression().fit(X, y)
       pose = reg.predict(np.array([[time]]))[0]
@@ -224,6 +230,7 @@ if __name__ == "__main__":
 
   parser.add_argument("-m", "--method", type=str, required=True, choices=["kalman_ca", "kalman_cv", "rwr"], help="Method to use for state estimation.")
   parser.add_argument("--frame_rate", type=float, default=30, help="Frequency of the poses in the input data")
+  parser.add_argument("--degrees", action="store_true", help="Output euler angles in degrees")
 
   args = parser.parse_args()
 
@@ -235,16 +242,16 @@ if __name__ == "__main__":
   if args.all:
     for run_dir in os.listdir(DEBUG_DIR):
       if os.path.isdir(run_dir):
-        node = StateEstimator(run_dir, method=args.method, frame_rate=args.frame_rate)
+        node = StateEstimator(run_dir, method=args.method, frame_rate=args.frame_rate, degrees=args.degrees)
         node.process()
   elif args.latest:
     latest_dir = max([f.path for f in os.scandir(DEBUG_DIR) if f.is_dir()], key=os.path.getmtime)
-    node = StateEstimator(latest_dir, method=args.method, frame_rate=args.frame_rate)
+    node = StateEstimator(latest_dir, method=args.method, frame_rate=args.frame_rate, degrees=args.degrees)
     node.process()
   elif args.run_dir:
     if not os.path.exists(args.run_dir):
       print(f"The directory {args.run_dir} does not exist")
       exit()
-    node = StateEstimator(args.run_dir, method=args.method, frame_rate=args.frame_rate)
+    node = StateEstimator(args.run_dir, method=args.method, frame_rate=args.frame_rate, degrees=args.degrees)
     node.process()
   

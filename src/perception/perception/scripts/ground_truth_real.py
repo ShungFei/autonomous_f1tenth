@@ -1,5 +1,6 @@
 from typing import Literal
 import cv2
+import pickle
 import pandas as pd
 import numpy as np
 from scipy.signal import savgol_filter
@@ -7,6 +8,7 @@ from sklearn.preprocessing import PolynomialFeatures
 import statsmodels.api as sm
 from perception import state_estimation
 import perception.util.conversion as conv
+from scipy import stats
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
 BEV_TO_BACK_OPP_X = -100.0
@@ -35,6 +37,22 @@ class GroundTruthMeasurements:
     self.ego_top_marker_to_ego_cam_rot = ego_top_marker_to_ego_cam_rot
     self.opp_top_marker_to_opp_back_marker_rot = opp_top_marker_to_opp_back_marker_rot
 
+def generate_df_from_monte_carlo(monte_carlo_results):
+  df = pd.DataFrame([{
+    "time": results["time"],
+    **{f"{t}_mean": results["mean"]["tvec"][i] for i, t in enumerate(["tx", "ty", "tz"])},
+    **{f"{e}_mean": results["mean"]["euler"][i] for i, e in enumerate(["roll", "pitch", "yaw"])},
+    **{f"{t}_std": results["std"]["tvec"][i] for i, t in enumerate(["tx", "ty", "tz"])},
+    **{f"{e}_std": results["std"]["euler"][i] for i, e in enumerate(["roll", "pitch", "yaw"])},
+    **{f"{t}_2.5": results["95"]["tvec"][0, i] for i, t in enumerate(["tx", "ty", "tz"])},
+    **{f"{t}_97.5": results["95"]["tvec"][1, i] for i, t in enumerate(["tx", "ty", "tz"])},
+    **{f"{e}_2.5": results["95"]["euler"][0, i] for i, e in enumerate(["roll", "pitch", "yaw"])},
+    **{f"{e}_97.5": results["95"]["euler"][1, i] for i, e in enumerate(["roll", "pitch", "yaw"])},
+    "cov": results["cov"]
+  } for results in monte_carlo_results])
+
+  return df
+  
 def read_single_run(bev_path, ego_path, window_before_start_time=1, selected_bev_cam="right"):
   start_time = int(np.loadtxt(f'{bev_path}/start_time.txt')) / 1e9
  
@@ -43,17 +61,20 @@ def read_single_run(bev_path, ego_path, window_before_start_time=1, selected_bev
 
   opp_pose_df = remove_unused_frames(
     pd.read_csv(f'{bev_path}/bev/{selected_bev_cam}/opp_poses.csv'), start_time, window_before_start_time)
-
+    
   tracking_df = remove_unused_frames(
     pd.read_csv(f'{ego_path}/opp_rel_poses.csv'), start_time, window_before_start_time)
   
-  state_estimation_kalman_ca_df = remove_unused_frames(
-    pd.read_csv(f'{ego_path}/state_estimates_kalman_ca.csv'), start_time, window_before_start_time)
+  state_estimation_dfs = {
+    f"{method}_df": remove_unused_frames(
+      pd.read_csv(f'{ego_path}/state_estimates_{method}.csv'), start_time, window_before_start_time) \
+      for method in ["kalman_ca", "kalman_cv", "rwr"]
+  }
   
-  state_estimation_kalman_cv_df = remove_unused_frames(
-    pd.read_csv(f'{ego_path}/state_estimates_kalman_cv.csv'), start_time, window_before_start_time)
+  monte_carlo_results = pickle.load(open(f'{bev_path}/bev/{selected_bev_cam}/monte_carlo_results.pkl', 'rb'))
+  monte_carlo_df = remove_unused_frames(generate_df_from_monte_carlo(monte_carlo_results), start_time, window_before_start_time)
 
-  return ego_pose_df, opp_pose_df, tracking_df, state_estimation_kalman_ca_df, state_estimation_kalman_cv_df
+  return ego_pose_df, opp_pose_df, tracking_df, state_estimation_dfs, monte_carlo_df
 
 def read_all_runs(bev_paths, ego_paths, window_before_start_time=1):
   run_data = []
@@ -62,8 +83,8 @@ def read_all_runs(bev_paths, ego_paths, window_before_start_time=1):
 
   for bev_path, ego_path in zip(bev_paths, ego_paths):
     start_time = int(np.loadtxt(f'{bev_path}/start_time.txt')) / 1e9
-    ego_bev_right_df, opp_bev_right_df, tracking_df, state_estimation_kalman_ca_df, state_estimation_kalman_cv_df = read_single_run(bev_path, ego_path, window_before_start_time, selected_bev_cam="right")
-    ego_bev_left_df, opp_bev_left_df, _, _, _= read_single_run(bev_path, ego_path, window_before_start_time, selected_bev_cam="left")
+    ego_bev_right_df, opp_bev_right_df, tracking_df, state_estimation_dfs, monte_carlo_right_df = read_single_run(bev_path, ego_path, window_before_start_time, selected_bev_cam="right")
+    ego_bev_left_df, opp_bev_left_df, _, _, monte_carlo_left_df = read_single_run(bev_path, ego_path, window_before_start_time, selected_bev_cam="left")
     
     run_data.append({
       "start_time": start_time,
@@ -76,8 +97,9 @@ def read_all_runs(bev_paths, ego_paths, window_before_start_time=1):
         "opp_bev_left_df": opp_bev_left_df,
       },
       "tracking_df": tracking_df,
-      "kalman_ca_df": state_estimation_kalman_ca_df,
-      "kalman_cv_df": state_estimation_kalman_cv_df
+      "monte_carlo_right_df": monte_carlo_right_df,
+      "monte_carlo_left_df": monte_carlo_left_df,
+      **state_estimation_dfs
     })
   return run_data
 
@@ -98,22 +120,25 @@ def remove_unused_frames(poses_df: pd.DataFrame, start_time, window_before_start
   
   return poses_df_start_time
 
-def find_closest_equiv_angle(alpha, beta):
+def find_closest_equiv_angle(alpha, beta, degrees=False):
   """
   Find the equivalent angle to alpha that is closest to beta
   """
+  threshold_diff = 180 if degrees else np.pi
   diff = beta - alpha
-  if diff > 180:
-    return alpha + 360
-  elif diff < -180:
-    return alpha - 360
+  
+  if diff > threshold_diff:
+    return alpha + 2 * threshold_diff
+  elif diff < -threshold_diff:
+    return alpha - 2 * threshold_diff
   return alpha
 
-def stabilise_euler_angles(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+def stabilise_euler_angles(df: pd.DataFrame, cols: list[str], degrees=False) -> pd.DataFrame:
   """
   Stabilise the Euler angles by ensuring that the difference 
   between consecutive angles is less than 180 degrees
   """
+  diff = 180 if degrees else np.pi
   for i, row in df.iterrows():
     if i == 0:
       continue
@@ -122,11 +147,11 @@ def stabilise_euler_angles(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
       prev = df.loc[i - 1, col]
       curr = row[col]
 
-      if abs(prev - curr) > 180:
-        df.loc[i, col] = find_closest_equiv_angle(curr, prev) 
+      if abs(prev - curr) > diff:
+        df.loc[i, col] = find_closest_equiv_angle(curr, prev, degrees) 
 
   for col in cols:
-    df.loc[0, col] = find_closest_equiv_angle(df.loc[0, col], df.loc[1, col])  
+    df.loc[0, col] = find_closest_equiv_angle(df.loc[0, col], df.loc[1, col], degrees)  
     
   return df
 
@@ -227,11 +252,55 @@ def remove_nan_rows(run: list[dict]):
   run["tracking_df"] = run["tracking_df"][run["tracking_df"]["time (sec)"] <= last_bev_pose_time]
   run["tracking_df"] = run["tracking_df"].dropna().reset_index(drop=True)
 
-  run["kalman_ca_df"] = run["kalman_ca_df"][run["kalman_ca_df"]["time (sec)"] <= last_bev_pose_time]
-  run["kalman_ca_df"] = run["kalman_ca_df"].dropna().reset_index(drop=True)
+  for state_est_method in ["kalman_ca", "kalman_cv", "rwr"]:
+    run[f"{state_est_method}_df"] = run[f"{state_est_method}_df"][run[f"{state_est_method}_df"]["time (sec)"] <= last_bev_pose_time]
+    run[f"{state_est_method}_df"] = run[f"{state_est_method}_df"].dropna().reset_index(drop=True)
 
-  run["kalman_cv_df"] = run["kalman_cv_df"][run["kalman_cv_df"]["time (sec)"] <= last_bev_pose_time]
-  run["kalman_cv_df"] = run["kalman_cv_df"].dropna().reset_index(drop=True)
+def generate_avg_bev_df(left_df: pd.DataFrame, right_df: pd.DataFrame, cols: list[str]):
+  avg_df = left_df.copy()
+  for col in cols:
+    avg_df[col] = (left_df[col] + right_df[col]) / 2
+  return avg_df[["time", "time (sec)", "time_norm (sec)", *cols]].dropna().reset_index(drop=True)
+
+def generate_avg_monte_carlo_df(left_df: pd.DataFrame, right_df: pd.DataFrame):
+  """
+  Computes the average of the results from the left and right cameras' Monte Carlo runs
+
+  Assumes a Gaussian distribution for the Monte Carlo results
+  """
+  avg_df = left_df.copy()
+  for col in left_df.columns:
+    if col in ["time", "time (sec)", "time_norm (sec)"]:
+      continue
+    if col.endswith("_std"):
+      avg_df[col] = np.sqrt((left_df[col] ** 2 + right_df[col] ** 2)) / 2
+    elif col.endswith("_2.5"):
+      # Assume Gaussian distribution
+      stats.norm.ppf(0.025) * np.sqrt((left_df[col] ** 2 + right_df[col] ** 2)) / 2 + (left_df[col] + right_df[col]) / 2
+    elif col.endswith("_97.5"):
+      # Assume Gaussian distribution
+      stats.norm.ppf(0.975) * np.sqrt((left_df[col] ** 2 + right_df[col] ** 2)) / 2 + (left_df[col] + right_df[col]) / 2
+    elif col.endswith("_mean"):
+      avg_df[col] = (left_df[col] + right_df[col]) / 2
+  return avg_df.dropna().reset_index(drop=True)
+
+def correct_euler_offset(src_df: pd.DataFrame, compare_df: pd.DataFrame,
+                         src_cols: list[str], compare_cols: list[str] | None = None, inplace=False):
+  """
+  Check if the Euler angle is larger or smaller than compare_df 
+  by 180 degrees and correct
+  """
+  if compare_cols is None:
+    compare_cols = src_cols
+  if not inplace:
+    src_df = src_df.copy()
+
+  for src_col, compare_col in zip(src_cols, compare_cols):
+    if src_df.iloc[0][src_col] - compare_df.iloc[0][compare_col] > 180:
+      src_df[src_col] = src_df[src_col] - 360
+    elif src_df.iloc[0][src_col] - compare_df.iloc[0][compare_col] < -180:
+      src_df[src_col] = src_df[src_col] + 360
+  return src_df
 
 def process_run_data(run_data: list[dict], measurements: GroundTruthMeasurements, smoothing_types: list[Literal["savgol", "rolling", "lowess"]] = []):
   for run in run_data:
@@ -240,10 +309,30 @@ def process_run_data(run_data: list[dict], measurements: GroundTruthMeasurements
     run["tracking_df"] = remove_unused_frames(run["tracking_df"], run["start_time"])
     run["tracking_df"] = generate_euler_angles(run["tracking_df"])
 
+    monte_carlo_euler_cols = []
+    monte_carlo_compare_cols = []
+    for n in ["mean", "2.5", "97.5"]:
+      for e in ["roll", "pitch", "yaw"]:
+        monte_carlo_euler_cols.append(f"{e}_{n}")
+        monte_carlo_compare_cols.append(f"{e}")
+    
+    # Correct the euler offsets for the monte carlo results
+    for df_name in ["monte_carlo_right_df", "monte_carlo_left_df"]:
+      run[df_name] = stabilise_euler_angles(run[df_name], monte_carlo_euler_cols)
+      run[df_name] = correct_euler_offset(run[df_name], run["tracking_df"], monte_carlo_euler_cols, monte_carlo_compare_cols)
+    
+    run["monte_carlo_avg_df"] = generate_avg_monte_carlo_df(run["monte_carlo_left_df"], run["monte_carlo_right_df"])
+    
     for df_name in run["raw"].keys():
       run["raw"][df_name] = remove_unused_frames(run["raw"][df_name], run["start_time"])
       run["raw"][df_name] = generate_euler_angles(run["raw"][df_name])
     
+    # Generate the average BEV poses
+    run["raw"]["ego_avg_bev_df"] = generate_avg_bev_df(
+      run["raw"]["ego_bev_left_df"],
+      run["raw"]["ego_bev_right_df"],
+      ["tx", "ty", "tz", "roll", "pitch", "yaw"])
+
     for smoothing_type in smoothing_types:
       run[smoothing_type] = {
         df_name: generate_smoothed_data(run["raw"][df_name], smoothing_type) for df_name in run["raw"]
@@ -252,18 +341,23 @@ def process_run_data(run_data: list[dict], measurements: GroundTruthMeasurements
     for smoothing_type in ["raw"] + smoothing_types:
       run[smoothing_type]["rel_poses_left_df"] = compute_relative_pose(run[smoothing_type]["ego_bev_left_df"], run[smoothing_type]["opp_bev_left_df"], measurements)
       run[smoothing_type]["rel_poses_right_df"] = compute_relative_pose(run[smoothing_type]["ego_bev_right_df"], run[smoothing_type]["opp_bev_right_df"], measurements)
-
+      
       # Make the angle difference between consecutive frames less than 180 degrees
-      run[smoothing_type]["rel_poses_left_df"] = stabilise_euler_angles(run[smoothing_type]["rel_poses_left_df"], ["rel_roll", "rel_pitch", "rel_yaw"])
-      run[smoothing_type]["rel_poses_right_df"] = stabilise_euler_angles(run[smoothing_type]["rel_poses_right_df"], ["rel_roll", "rel_pitch", "rel_yaw"])
+      run[smoothing_type]["rel_poses_left_df"] = stabilise_euler_angles(run[smoothing_type]["rel_poses_left_df"], ["roll", "pitch", "yaw"])
+      run[smoothing_type]["rel_poses_right_df"] = stabilise_euler_angles(run[smoothing_type]["rel_poses_right_df"], ["roll", "pitch", "yaw"])
 
-      # check if the euler angle is larger or smaller than tracking_df by 180 degrees
-      for col in ["roll", "pitch", "yaw"]:
-        for df_name in ["rel_poses_left_df", "rel_poses_right_df"]:
-          if run[smoothing_type][df_name].iloc[0][col] - run["tracking_df"].iloc[0][col] > 180:
-            run[smoothing_type][df_name][col] = run[smoothing_type][df_name][col] - 360
-          elif run[smoothing_type][df_name].iloc[0][col] - run["tracking_df"].iloc[0][col] < -180:
-            run[smoothing_type][df_name][col] = run[smoothing_type][df_name][col] + 360
+      # Check if the Euler angle is larger or smaller than tracking_df by 180 degrees and correct
+      for df_name in ["rel_poses_left_df", "rel_poses_right_df"]:
+        run[smoothing_type][df_name] = correct_euler_offset(
+          run[smoothing_type][df_name],
+          run["tracking_df"],
+          ["roll", "pitch", "yaw"]
+        )
+
+      # generate the average relative poses
+      run[smoothing_type]["rel_poses_avg_df"] = generate_avg_bev_df(
+        run[smoothing_type]["rel_poses_left_df"], run[smoothing_type]["rel_poses_right_df"],
+        ["tx", "ty", "tz", "roll", "pitch", "yaw"])
 
   return run_data
 
@@ -327,6 +421,7 @@ def compute_relative_pose(ego_bev_df: pd.DataFrame, opp_bev_df: pd.DataFrame, me
       measurements)
     
     rel_poses = pd.concat([rel_poses, pd.DataFrame([{
+      "time": ego_bev_df.loc[i, "time"],
       "time (sec)": ego_bev_df.loc[i, "time (sec)"],
       "time_norm (sec)": ego_bev_df.loc[i, "time_norm (sec)"],
       "tx": ground_truth_rel_pose_ego_cam_frame[0],

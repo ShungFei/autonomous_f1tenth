@@ -120,7 +120,7 @@ def remove_unused_frames(poses_df: pd.DataFrame, start_time, window_before_start
   
   return poses_df_start_time
 
-def find_closest_equiv_angle(alpha, beta, degrees=False):
+def find_closest_equiv_angle(alpha, beta, degrees=True):
   """
   Find the equivalent angle to alpha that is closest to beta
   """
@@ -133,7 +133,7 @@ def find_closest_equiv_angle(alpha, beta, degrees=False):
     return alpha - 2 * threshold_diff
   return alpha
 
-def stabilise_euler_angles(df: pd.DataFrame, cols: list[str], degrees=False) -> pd.DataFrame:
+def stabilise_euler_angles(df: pd.DataFrame, cols: list[str], degrees=True) -> pd.DataFrame:
   """
   Stabilise the Euler angles by ensuring that the difference 
   between consecutive angles is less than 180 degrees
@@ -155,11 +155,11 @@ def stabilise_euler_angles(df: pd.DataFrame, cols: list[str], degrees=False) -> 
     
   return df
 
-def generate_euler_angles(poses_df: pd.DataFrame) -> pd.DataFrame:
+def generate_euler_angles(poses_df: pd.DataFrame, degrees=True) -> pd.DataFrame:
   poses_df['roll'], poses_df['pitch'], poses_df['yaw'] = \
-    zip(*poses_df.apply(lambda row: conv.get_euler_from_quaternion(*row[['qx','qy','qz','qw']], degrees=True), axis=1))
+    zip(*poses_df.apply(lambda row: conv.get_euler_from_quaternion(*row[['qx','qy','qz','qw']], degrees=degrees), axis=1))
 
-  stabilised_df = stabilise_euler_angles(poses_df, ['roll', 'pitch', 'yaw'])
+  stabilised_df = stabilise_euler_angles(poses_df, ['roll', 'pitch', 'yaw'], degrees=degrees)
   return stabilised_df
 
 def get_ego_cam_from_top_marker(bev_to_ego_top_marker_rvec, tvec, measurements: GroundTruthMeasurements):
@@ -209,7 +209,7 @@ def rotate_bev_frame_to_ego_cam_frame(bev_to_ego_top_marker_rvec, tvec, measurem
   return measurements.ego_top_marker_to_ego_cam_rot.T @ ego_top_marker_to_bev_rot @ tvec
 
 def get_ground_truth_rel_pose_ego_cam_frame(bev_to_ego_top_marker_rvec, ego_top_marker_in_bev_frame, bev_to_opp_top_marker_rvec, opp_top_marker_in_bev_frame,
-                                             measurements: GroundTruthMeasurements):
+                                             measurements: GroundTruthMeasurements, degrees=True):
   ego_cam_in_bev_frame = get_ego_cam_from_top_marker(bev_to_ego_top_marker_rvec, ego_top_marker_in_bev_frame, measurements)
   # Get position of opponent back marker in BEV frame
   opp_back_in_bev_frame = get_opp_back_from_top_marker(bev_to_opp_top_marker_rvec, opp_top_marker_in_bev_frame, measurements)
@@ -223,7 +223,7 @@ def get_ground_truth_rel_pose_ego_cam_frame(bev_to_ego_top_marker_rvec, ego_top_
   # TODO: make bev_to_ego_cam_rot a fixed global variable
   bev_to_ego_cam_rot = cv2.Rodrigues(bev_to_ego_top_marker_rvec)[0] @ measurements.ego_top_marker_to_ego_cam_rot
   bev_to_opp_back_rot = cv2.Rodrigues(bev_to_opp_top_marker_rvec)[0] @ measurements.opp_top_marker_to_opp_back_marker_rot
-  ego_cam_to_opp_back_euler = conv.get_euler_from_rotation_matrix(bev_to_ego_cam_rot.T @ bev_to_opp_back_rot, degrees=True)
+  ego_cam_to_opp_back_euler = conv.get_euler_from_rotation_matrix(bev_to_ego_cam_rot.T @ bev_to_opp_back_rot, degrees=degrees)
   
   return rel_pos_ego_cam_frame, ego_cam_to_opp_back_euler
 
@@ -285,7 +285,7 @@ def generate_avg_monte_carlo_df(left_df: pd.DataFrame, right_df: pd.DataFrame):
   return avg_df.dropna().reset_index(drop=True)
 
 def correct_euler_offset(src_df: pd.DataFrame, compare_df: pd.DataFrame,
-                         src_cols: list[str], compare_cols: list[str] | None = None, inplace=False):
+                         src_cols: list[str], compare_cols: list[str] | None = None, degrees=True, inplace=False):
   """
   Check if the Euler angle is larger or smaller than compare_df 
   by 180 degrees and correct
@@ -294,20 +294,21 @@ def correct_euler_offset(src_df: pd.DataFrame, compare_df: pd.DataFrame,
     compare_cols = src_cols
   if not inplace:
     src_df = src_df.copy()
+  diff = 180 if degrees else np.pi
 
   for src_col, compare_col in zip(src_cols, compare_cols):
-    if src_df.iloc[0][src_col] - compare_df.iloc[0][compare_col] > 180:
-      src_df[src_col] = src_df[src_col] - 360
-    elif src_df.iloc[0][src_col] - compare_df.iloc[0][compare_col] < -180:
-      src_df[src_col] = src_df[src_col] + 360
+    if src_df.iloc[0][src_col] - compare_df.iloc[0][compare_col] > diff:
+      src_df[src_col] = src_df[src_col] - 2 * diff
+    elif src_df.iloc[0][src_col] - compare_df.iloc[0][compare_col] < -diff:
+      src_df[src_col] = src_df[src_col] + 2 * diff
   return src_df
 
-def process_run_data(run_data: list[dict], measurements: GroundTruthMeasurements, smoothing_types: list[Literal["savgol", "rolling", "lowess"]] = []):
+def process_run_data(run_data: list[dict], measurements: GroundTruthMeasurements, smoothing_types: list[Literal["savgol", "rolling", "lowess"]] = [], degrees=True):
   for run in run_data:
     remove_nan_rows(run)
 
     run["tracking_df"] = remove_unused_frames(run["tracking_df"], run["start_time"])
-    run["tracking_df"] = generate_euler_angles(run["tracking_df"])
+    run["tracking_df"] = generate_euler_angles(run["tracking_df"], degrees=degrees)
 
     monte_carlo_euler_cols = []
     monte_carlo_compare_cols = []
@@ -318,14 +319,14 @@ def process_run_data(run_data: list[dict], measurements: GroundTruthMeasurements
     
     # Correct the euler offsets for the monte carlo results
     for df_name in ["monte_carlo_right_df", "monte_carlo_left_df"]:
-      run[df_name] = stabilise_euler_angles(run[df_name], monte_carlo_euler_cols)
-      run[df_name] = correct_euler_offset(run[df_name], run["tracking_df"], monte_carlo_euler_cols, monte_carlo_compare_cols)
+      run[df_name] = stabilise_euler_angles(run[df_name], monte_carlo_euler_cols, degrees=True)
+      run[df_name] = correct_euler_offset(run[df_name], run["tracking_df"], monte_carlo_euler_cols, monte_carlo_compare_cols, degrees=True)
     
     run["monte_carlo_avg_df"] = generate_avg_monte_carlo_df(run["monte_carlo_left_df"], run["monte_carlo_right_df"])
     
     for df_name in run["raw"].keys():
       run["raw"][df_name] = remove_unused_frames(run["raw"][df_name], run["start_time"])
-      run["raw"][df_name] = generate_euler_angles(run["raw"][df_name])
+      run["raw"][df_name] = generate_euler_angles(run["raw"][df_name], degrees=degrees)
     
     # Generate the average BEV poses
     run["raw"]["ego_avg_bev_df"] = generate_avg_bev_df(
@@ -335,7 +336,8 @@ def process_run_data(run_data: list[dict], measurements: GroundTruthMeasurements
 
     for smoothing_type in smoothing_types:
       run[smoothing_type] = {
-        df_name: generate_smoothed_data(run["raw"][df_name], smoothing_type) for df_name in run["raw"]
+        df_name: generate_smoothed_data(run["raw"][df_name], smoothing_type, frac=0.01) \
+          for df_name in run["raw"]
       }
   
     for smoothing_type in ["raw"] + smoothing_types:
@@ -343,15 +345,16 @@ def process_run_data(run_data: list[dict], measurements: GroundTruthMeasurements
       run[smoothing_type]["rel_poses_right_df"] = compute_relative_pose(run[smoothing_type]["ego_bev_right_df"], run[smoothing_type]["opp_bev_right_df"], measurements)
       
       # Make the angle difference between consecutive frames less than 180 degrees
-      run[smoothing_type]["rel_poses_left_df"] = stabilise_euler_angles(run[smoothing_type]["rel_poses_left_df"], ["roll", "pitch", "yaw"])
-      run[smoothing_type]["rel_poses_right_df"] = stabilise_euler_angles(run[smoothing_type]["rel_poses_right_df"], ["roll", "pitch", "yaw"])
+      run[smoothing_type]["rel_poses_left_df"] = stabilise_euler_angles(run[smoothing_type]["rel_poses_left_df"], ["roll", "pitch", "yaw"], degrees=degrees)
+      run[smoothing_type]["rel_poses_right_df"] = stabilise_euler_angles(run[smoothing_type]["rel_poses_right_df"], ["roll", "pitch", "yaw"], degrees=degrees)
 
       # Check if the Euler angle is larger or smaller than tracking_df by 180 degrees and correct
       for df_name in ["rel_poses_left_df", "rel_poses_right_df"]:
         run[smoothing_type][df_name] = correct_euler_offset(
           run[smoothing_type][df_name],
           run["tracking_df"],
-          ["roll", "pitch", "yaw"]
+          ["roll", "pitch", "yaw"],
+          degrees=degrees
         )
 
       # generate the average relative poses
@@ -405,7 +408,7 @@ def generate_smoothed_data(poses_df: pd.DataFrame, func: Literal["savgol", "roll
 
   return poses_df
 
-def compute_relative_pose(ego_bev_df: pd.DataFrame, opp_bev_df: pd.DataFrame, measurements: GroundTruthMeasurements):
+def compute_relative_pose(ego_bev_df: pd.DataFrame, opp_bev_df: pd.DataFrame, measurements: GroundTruthMeasurements, degrees=True):
   rel_poses = pd.DataFrame(columns=["time (sec)", "time_norm (sec)"])
 
   for i in range(len(ego_bev_df)):
@@ -418,7 +421,7 @@ def compute_relative_pose(ego_bev_df: pd.DataFrame, opp_bev_df: pd.DataFrame, me
     ground_truth_rel_pose_ego_cam_frame, ground_truth_ego_cam_to_opp_back_euler = get_ground_truth_rel_pose_ego_cam_frame(
       ego_top_marker_to_bev_rvec, ego_top_marker_in_bev_frame,
       opp_top_marker_to_bev_rvec, opp_top_marker_in_bev_frame,
-      measurements)
+      measurements, degrees)
     
     rel_poses = pd.concat([rel_poses, pd.DataFrame([{
       "time": ego_bev_df.loc[i, "time"],

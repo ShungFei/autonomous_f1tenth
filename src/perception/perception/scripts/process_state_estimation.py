@@ -21,6 +21,7 @@ class StateEstimator():
     self.degrees = degrees
       
   def process(self):
+    all_state_estimates = []
     for process_sub_dir, _, _ in os.walk(self.run_dir):
       print('Processing:', process_sub_dir)
 
@@ -44,7 +45,10 @@ class StateEstimator():
       elif self.method == "rwr":
         state_estimates = self.process_velocity_rolling_window_regression(measured_poses, window_size=5)
       
+      all_state_estimates.append(state_estimates)
       self.write_data(state_estimates, f"{process_sub_dir}/state_estimates_{self.method}.csv")
+    
+    return all_state_estimates
 
   def process_kalman_filter(self, measured_poses, is_constant_velocity_model):
     # Index is all potential time intervals between the first and last time in the measured poses
@@ -146,7 +150,7 @@ class StateEstimator():
     # State covariance
     kf.P = np.diag([1, 1, 1, 2, 2, 2, 3, 3, 3, 1, 1, 1, 2, 2, 2, 3, 3, 3])
     # Process noise
-    q = Q_discrete_white_noise(dim=3, dt=dt, var=0.05)
+    q = Q_discrete_white_noise(dim=3, dt=dt, var=10)
 
     q_second_order = np.array([[q[0, 0], 0, 0, q[0, 1], 0, 0, q[0, 2], 0, 0],
                                 [0, q[0, 0], 0, 0, q[0, 1], 0, 0, q[0, 2], 0],
@@ -162,7 +166,7 @@ class StateEstimator():
     kf.Q = block_diag(q_second_order, q_second_order)
     
     # Measurement noise
-    kf.R = np.eye(6) * 0.05
+    kf.R = np.diag([0.05, 0.05, 0.05, 4, 4, 4])
 
     # Transition matrix
     a_t = np.array([[1, 0, 0, dt, 0, 0, 0.5*dt**2, 0, 0],

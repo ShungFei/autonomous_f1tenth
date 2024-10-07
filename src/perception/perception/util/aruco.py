@@ -31,7 +31,7 @@ def locate_aruco_corners(image: np.ndarray, aruco_dictionary) -> tuple[np.ndarra
     
     return arucos
 
-def locate_aruco_poses(image: np.ndarray, aruco_dictionary, marker_obj_points, intrinsics, dist_coeffs, output_all=False) -> dict[int, tuple[np.ndarray, np.ndarray]]:
+def locate_aruco_poses(image: np.ndarray, aruco_dictionary, marker_obj_points, intrinsics, dist_coeffs, output_all=False, return_corners=False) -> dict[int, tuple[np.ndarray, np.ndarray]]:
     """
     Returns a dictionary of detected ArUco markers and their poses
     """
@@ -57,4 +57,6 @@ def locate_aruco_poses(image: np.ndarray, aruco_dictionary, marker_obj_points, i
           # TODO: handle multiple markers of the same ID
           aruco_poses[id] = (rvec, tvec)
 
+    if return_corners:
+      return aruco_poses, aruco_corners
     return aruco_poses

@@ -68,7 +68,7 @@ def read_single_run(bev_path, ego_path, window_before_start_time=1, selected_bev
   state_estimation_dfs = {
     f"{method}_df": remove_unused_frames(
       pd.read_csv(f'{ego_path}/state_estimates_{method}.csv'), start_time, window_before_start_time) \
-      for method in ["kalman_ca", "kalman_cv", "rwr"]
+      for method in ["kalman_ca", "kalman_cv", "rwr", "kalman_ca_depth_fusion"]
   }
   
   monte_carlo_results = pickle.load(open(f'{bev_path}/bev/{selected_bev_cam}/monte_carlo_results.pkl', 'rb'))

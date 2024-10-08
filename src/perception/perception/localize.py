@@ -274,7 +274,7 @@ class CarLocalizer(Node):
 
     # for each x,y,z,roll,pitch,yaw generate a plot with the pose estimate and the ground truth
     for val in ["x", "y", "z", "roll", "pitch", "yaw"]:
-      plt.figure(figsize=(10, 6))
+      plt.figure(figsize=(10, 10))
       plt.xlabel("Time (s)")
       plt.ylabel(val)
       sns.lineplot(x="time (sec)", y=val, data=pose_est_df, label="Pose estimation")

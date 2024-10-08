@@ -252,7 +252,7 @@ def remove_nan_rows(run: list[dict]):
   run["tracking_df"] = run["tracking_df"][run["tracking_df"]["time (sec)"] <= last_bev_pose_time]
   run["tracking_df"] = run["tracking_df"].dropna().reset_index(drop=True)
 
-  for state_est_method in ["kalman_ca", "kalman_cv", "rwr"]:
+  for state_est_method in ["kalman_ca", "kalman_cv", "rwr", "kalman_ca_depth_fusion"]:
     run[f"{state_est_method}_df"] = run[f"{state_est_method}_df"][run[f"{state_est_method}_df"]["time (sec)"] <= last_bev_pose_time]
     run[f"{state_est_method}_df"] = run[f"{state_est_method}_df"].dropna().reset_index(drop=True)
 
@@ -336,7 +336,7 @@ def process_run_data(run_data: list[dict], measurements: GroundTruthMeasurements
 
     for smoothing_type in smoothing_types:
       run[smoothing_type] = {
-        df_name: generate_smoothed_data(run["raw"][df_name], smoothing_type, frac=0.01) \
+        df_name: generate_smoothed_data(run["raw"][df_name], smoothing_type) \
           for df_name in run["raw"]
       }
   

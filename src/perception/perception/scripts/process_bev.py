@@ -12,15 +12,22 @@ class BEVProcessor():
   """
   This class processes the dumped BEV images to localize the ego and opponent cars
   """
-  def __init__(self, process_dir, side_length=0.15, ego_aruco_id=0, opp_aruco_id=1, reproj_error_threshold=1.0):
+  def __init__(self, process_dir, side_length=0.15, ego_aruco_id=0, opp_aruco_id=1, corner_ref_method: str | None = None, reproj_error_threshold=1.0):
     self.process_dir = process_dir
     self.side_length = side_length
 
     self.ego_aruco_id = ego_aruco_id
     self.opp_aruco_id = opp_aruco_id
 
+    if corner_ref_method == "subpix":
+      self.corner_ref_method = cv2.aruco.CORNER_REFINE_SUBPIX
+    elif corner_ref_method == "apriltag":
+      self.corner_ref_method = cv2.aruco.CORNER_REFINE_APRILTAG
+    elif corner_ref_method == "none":
+      self.corner_ref_method = cv2.aruco.CORNER_REFINE_NONE
+    print(self.corner_ref_method)
     self.detector_params = cv2.aruco.DetectorParameters()
-    self.detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+    self.detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_APRILTAG
     self.aruco_dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_250)
     self.term_criteria = (cv2.TERM_CRITERIA_EPS, 30, 0.01)
 
@@ -170,7 +177,8 @@ class BEVProcessor():
           time = image_file.strip(".png")
           image = cv2.imread(f"{process_sub_dir}/{image_file}")
           
-          aruco_corners, aruco_poses = locate_aruco_poses(image, self.aruco_dictionary, self.marker_obj_points, intrinsics, dist_coeffs, output_all=True)
+          aruco_poses, aruco_corners = locate_aruco_poses(image, self.aruco_dictionary, self.marker_obj_points, 
+            intrinsics, dist_coeffs, return_corners=True, output_all=True, corner_ref_method=self.corner_ref_method)
           # aruco_corners["time"] = time
           # all_aruco_corners.append(aruco_corners)
           
@@ -242,6 +250,7 @@ if __name__ == "__main__":
   parser.add_argument("--ego_aruco_id", type=int, default=1, help="ID of the ego ArUco marker")
   parser.add_argument("--opp_aruco_id", type=int, default=14, help="ID of the opponent ArUco marker")
   parser.add_argument("--side_length", type=float, default=0.15, help="Side length of the ArUco markers")
+  parser.add_argument("--corner_ref_method", type=str, required=True, help="Corner refinement method")
 
   args = parser.parse_args()
 
@@ -254,17 +263,20 @@ if __name__ == "__main__":
     for run_dir in os.listdir(DEBUG_DIR):
       if os.path.isdir(run_dir):
         bev_dir = os.path.join(DEBUG_DIR, run_dir, "bev")
-        node = BEVProcessor(bev_dir, side_length=args.side_length, ego_aruco_id=args.ego_aruco_id, opp_aruco_id=args.opp_aruco_id)
+        node = BEVProcessor(bev_dir, side_length=args.side_length, ego_aruco_id=args.ego_aruco_id,
+                            opp_aruco_id=args.opp_aruco_id, corner_ref_method=args.corner_ref_method)
         node.process()
   elif args.latest:
     latest_dir = max([f.path for f in os.scandir(DEBUG_DIR) if f.is_dir()], key=os.path.getmtime)
     bev_dir = os.path.join(latest_dir, "bev")
-    node = BEVProcessor(bev_dir, side_length=args.side_length, ego_aruco_id=args.ego_aruco_id, opp_aruco_id=args.opp_aruco_id)
+    node = BEVProcessor(bev_dir, side_length=args.side_length, ego_aruco_id=args.ego_aruco_id,
+                         opp_aruco_id=args.opp_aruco_id, corner_ref_method=args.corner_ref_method)
     node.process()
   elif args.run_dir:
     # walk through the run directory
     if not os.path.exists(args.run_dir):
       print(f"Directory {args.run_dir} does not exist")
       exit()
-    node = BEVProcessor(args.run_dir, side_length=args.side_length, ego_aruco_id=args.ego_aruco_id, opp_aruco_id=args.opp_aruco_id)
+    node = BEVProcessor(args.run_dir, side_length=args.side_length, ego_aruco_id=args.ego_aruco_id,
+                        opp_aruco_id=args.opp_aruco_id, corner_ref_method=args.corner_ref_method)
     node.process()

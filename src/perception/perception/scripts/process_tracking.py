@@ -1,5 +1,6 @@
 import argparse
 import os
+from typing import Literal
 
 import cv2
 import numpy as np
@@ -12,13 +13,18 @@ class TrackingProcessor():
   """
   This class processes the dumped tracking data for the ego to localize the opponent car
   """
-  def __init__(self, process_dir, side_length=0.15, opp_back_aruco_id=15):
+  def __init__(self, process_dir, side_length=0.15, opp_back_aruco_id=15, corner_ref_method="subpix"):
     self.process_dir = f'{process_dir}'
     self.side_length = side_length
 
     self.opp_back_aruco_id = opp_back_aruco_id
 
-    # change this to the folder where the images are stored
+    if corner_ref_method == "none":
+      self.corner_ref_method = cv2.aruco.CORNER_REFINE_NONE
+    elif corner_ref_method == "subpix":
+      self.corner_ref_method = cv2.aruco.CORNER_REFINE_SUBPIX
+    elif corner_ref_method == "apriltag":
+      self.corner_ref_method = cv2.aruco.CORNER_REFINE_APRILTAG
 
     self.detector_params = cv2.aruco.DetectorParameters()
     self.detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
@@ -63,7 +69,8 @@ class TrackingProcessor():
       for time in df.index:
         # Load the images
         image = cv2.imread(f"{process_sub_dir}/{time}.png")
-        arucos, corners = locate_aruco_poses(image, self.aruco_dictionary, self.marker_obj_points, intrinsics, dist_coeffs, return_corners=True)
+        arucos, corners = locate_aruco_poses(image, self.aruco_dictionary, self.marker_obj_points, intrinsics, 
+          dist_coeffs, return_corners=True, corner_ref_method=self.corner_ref_method)
         if self.opp_back_aruco_id not in arucos:
           df.loc[time] = [None] * 13
         
@@ -145,6 +152,7 @@ if __name__ == "__main__":
 
   parser.add_argument("--opp_back_aruco_id", type=int, default=15, help="ID of the ArUco marker on the back of the opponent car")
   parser.add_argument("--side_length", type=float, default=0.15, help="Side length of the ArUco markers")
+  parser.add_argument("--corner_ref_method", type=Literal["none", "subpix", "apriltag"], default="subpix", help="Corner refinement method")
 
   args = parser.parse_args()
 
@@ -156,15 +164,18 @@ if __name__ == "__main__":
   if args.all:
     for run_dir in os.listdir(DEBUG_DIR):
       if os.path.isdir(run_dir):
-        node = TrackingProcessor(run_dir, side_length=args.side_length, opp_back_aruco_id=args.opp_back_aruco_id)
+        node = TrackingProcessor(run_dir, side_length=args.side_length,
+          opp_back_aruco_id=args.opp_back_aruco_id, corner_ref_method=args.corner_ref_method)
         node.process()
   elif args.latest:
     latest_dir = max([f.path for f in os.scandir(DEBUG_DIR) if f.is_dir()], key=os.path.getmtime)
-    node = TrackingProcessor(latest_dir, side_length=args.side_length, opp_back_aruco_id=args.opp_back_aruco_id)
+    node = TrackingProcessor(latest_dir, side_length=args.side_length,
+      opp_back_aruco_id=args.opp_back_aruco_id, corner_ref_method=args.corner_ref_method)
     node.process()
   elif args.run_dir:
     if not os.path.exists(args.run_dir):
       print(f"Directory {args.run_dir} does not exist")
       exit()
-    node = TrackingProcessor(args.run_dir, side_length=args.side_length, opp_back_aruco_id=args.opp_back_aruco_id)
+    node = TrackingProcessor(args.run_dir, side_length=args.side_length,
+      opp_back_aruco_id=args.opp_back_aruco_id, corner_ref_method=args.corner_ref_method)
     node.process()

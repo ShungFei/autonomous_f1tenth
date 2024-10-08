@@ -2,14 +2,14 @@ import cv2
 import numpy as np
 
 # COUNT = 0
-def locate_aruco_corners(image: np.ndarray, aruco_dictionary) -> tuple[np.ndarray, np.ndarray]:
+def locate_aruco_corners(image: np.ndarray, aruco_dictionary, corner_ref_method=cv2.aruco.CORNER_REFINE_SUBPIX) -> tuple[np.ndarray, np.ndarray]:
     # global COUNT
     """
     Returns the detected ArUco corners and IDs
     """
     # Add subpixel refinement to marker detector
     detector_params = cv2.aruco.DetectorParameters()
-    detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+    detector_params.cornerRefinementMethod = corner_ref_method
     # detector_params.cornerRefinementWinSize = 3
     # detector_params.cornerRefinementMaxIterations = 9999999
     # detector_params.cornerRefinementMinAccuracy = 0.01
@@ -31,7 +31,9 @@ def locate_aruco_corners(image: np.ndarray, aruco_dictionary) -> tuple[np.ndarra
     
     return arucos
 
-def locate_aruco_poses(image: np.ndarray, aruco_dictionary, marker_obj_points, intrinsics, dist_coeffs, output_all=False, return_corners=False) -> tuple[dict[int, np.ndarray], tuple[np.ndarray, np.ndarray]]:
+def locate_aruco_poses(image: np.ndarray, aruco_dictionary, marker_obj_points, intrinsics, dist_coeffs, output_all=False,
+                        return_corners=False, corner_ref_method=cv2.aruco.CORNER_REFINE_APRILTAG
+                       ) -> tuple[dict[int, np.ndarray], tuple[np.ndarray, np.ndarray]]:
     """
     Returns a dictionary of detected ArUco markers and their poses
     """
@@ -40,7 +42,7 @@ def locate_aruco_poses(image: np.ndarray, aruco_dictionary, marker_obj_points, i
     undistorted_image = cv2.undistort(image, intrinsics, dist_coeffs, None, newCameraMatrix=new_intrinsics)
     # cv2.imwrite("undistorted.png", undistorted_image)
     # cv2.imwrite("original.png", image)
-    aruco_corners = locate_aruco_corners(undistorted_image, aruco_dictionary)
+    aruco_corners = locate_aruco_corners(undistorted_image, aruco_dictionary, corner_ref_method=corner_ref_method)
     aruco_poses = {}
 
     for id, marker in aruco_corners.items():

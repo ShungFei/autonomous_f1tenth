@@ -1,24 +1,31 @@
 import math
+
+import pandas as pd
+from requests import get
+from perception.scripts.ground_truth_real import stabilise_euler_angles
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CameraInfo 
 from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import Vector3Stamped, PoseStamped
 from cv_bridge import CvBridge
-from message_filters import Subscriber, ApproximateTimeSynchronizer
+from message_filters import Subscriber, ApproximateTimeSynchronizer, TimeSynchronizer
 from datetime import datetime
 from collections import deque
 import cv2
 import pyrealsense2 as rs
 from queue import Queue
 from perception.util.aruco import locate_aruco_poses
+import perception.util.conversion as conv
+from matplotlib import pyplot as plt
+import seaborn as sns
 
 import os
 import numpy as np
 from math import sqrt
 
 import perception.util.ground_truth as GroundTruth
-from perception.util.conversion import get_euler_from_quaternion, get_quaternion_from_rodrigues, get_time_from_header, get_quaternion_from_rotation_matrix, get_time_from_rosclock
+from perception.util.conversion import get_euler_from_quaternion, get_quaternion_from_rodrigues, get_rotation_matrix_from_quaternion, get_time_from_header, get_quaternion_from_rotation_matrix, get_time_from_rosclock
 
 class CarLocalizer(Node):
   """
@@ -48,7 +55,7 @@ class CarLocalizer(Node):
     # Currently unused
     self.opponent_name = self.declare_parameter('opponent_name', "opponent").get_parameter_value().string_value
     self.debug = self.declare_parameter('debug', False).get_parameter_value().bool_value
-    self.opp_back_marker_id = self.declare_parameter('opp_back_marker_id', -1).get_parameter_value().integer_value
+    self.opp_back_marker_id = self.declare_parameter('opp_back_marker_id', 0).get_parameter_value().integer_value
     self.auto_exposure = self.declare_parameter('auto_exposure', False).get_parameter_value().bool_value
     self.exposure_time = self.declare_parameter('exposure_time', 50).get_parameter_value().integer_value
     self.gain = self.declare_parameter('gain', 128).get_parameter_value().integer_value
@@ -56,6 +63,9 @@ class CarLocalizer(Node):
 
     self.get_logger().info(f"Subscribing to {self.agent_name}")
 
+    plt.style.use("seaborn-v0_8")
+    sns.set_palette(sns.color_palette("colorblind"))
+    
     if self.debug == True:
       self.video_output = cv2.VideoWriter(f"{self.DEBUG_DIR}/detection.avi", cv2.VideoWriter_fourcc(*'XVID'), 20.0, (1920, 1080))
 
@@ -65,39 +75,87 @@ class CarLocalizer(Node):
         lambda data: self.image_callback(self.SELECTED_CAMERA, data), 
         10)
     
-    # This is used one time to get the camera parameters in simulation
-    self.color_camera_info_sub = self.create_subscription(
-      CameraInfo, 
-      f'{self.agent_name}/{self.camera_name}/{self.SELECTED_CAMERA}/camera_info', 
-      self.camera_info_callback, 
-      10
-    )
+    if self.is_sim:
+      ## CAMERA INTRINSICS SUBSCRIBERS ##
+      self.color_camera_info_sub = self.create_subscription(
+        CameraInfo, 
+        f'{self.agent_name}/{self.camera_name}/{self.SELECTED_CAMERA}/camera_info', 
+        self.camera_info_callback, 
+        10
+      )
 
-    self.opp_estimated_pose_pub = self.create_publisher(
-      PoseStamped,
-      f'{self.opponent_name}/pose_estimate',
-      10
-    )
+      self.opp_estimated_pose_pub = self.create_publisher(
+        PoseStamped,
+        f'{self.opponent_name}/pose_estimate',
+        10
+      )
+      
+      ## CAMERA IMAGE SUBSCRIBERS ##
+      self.color_image_sub = Subscriber(
+        self,
+        Image,
+        f'{self.agent_name}/{self.camera_name}/{self.SELECTED_CAMERA}/image_raw',
+      )
 
-    self.color_image_sub = Subscriber(
-      self,
-      Image,
-      f'{self.agent_name}/{self.camera_name}/{self.SELECTED_CAMERA}/image_raw',
-    )
+      self.depth_image_sub = Subscriber(
+        self,
+        Image,
+        f'{self.agent_name}/{self.camera_name}/{self.SELECTED_DEPTH_CAMERA}/image_rect_raw',
+      )
 
-    self.depth_image_sub = Subscriber(
-      self,
-      Image,
-      f'{self.agent_name}/{self.camera_name}/{self.SELECTED_DEPTH_CAMERA}/image_rect_raw',
-    )
+      self.eval_sub = ApproximateTimeSynchronizer(
+          # Add self.depth_image_sub if depth required
+          [self.color_image_sub],
+          10,
+          0.1,
+      )
+      self.eval_sub.registerCallback(self.pose_pub_callback)
 
-    self.eval_sub = ApproximateTimeSynchronizer(
-        # Add self.depth_image_sub if depth required
-        [self.color_image_sub],
+      ## GROUND TRUTH SUBSCRIBERS ##
+      self.agent_pose_sub = self.create_subscription(
+        TFMessage,
+        f'{self.agent_name}/pose', 
+        self.agent_pose_callback, 
+        10
+      )
+
+      self.opponent_pose_sub = self.create_subscription(
+        TFMessage,
+        f'{self.opponent_name}/pose',
+        self.opponent_pose_callback,
+        10
+      )
+
+      self.camera_pose_pub = self.create_publisher(
+        PoseStamped,
+        f'{self.agent_name}/camera_pose',
+        10
+      )
+
+      self.aruco_pose_pub = self.create_publisher(
+        PoseStamped,
+        f'{self.opponent_name}/aruco_pose',
+        10
+      )
+      self.camera_pose_sub = Subscriber(
+        self,
+        PoseStamped,
+        f'{self.agent_name}/camera_pose',
+      )
+
+      self.aruco_pose_sub = Subscriber(
+        self,
+        PoseStamped,
+        f'{self.opponent_name}/aruco_pose',
+      )
+
+      self.gt_sub = ApproximateTimeSynchronizer(
+        [self.camera_pose_sub, self.aruco_pose_sub],
         10,
-        0.1,
-    )
-    self.eval_sub.registerCallback(self.pose_pub_callback)
+        0.01
+      )
+      self.gt_sub.registerCallback(self.ground_truth_pose_callback)
+
     self.color_intrinsics = None
     self.color_dist_coeffs = None
     self.aruco_dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_250)
@@ -122,7 +180,7 @@ class CarLocalizer(Node):
     self.previous_image_time = get_time_from_rosclock(self.get_clock())
     self.previous_pose_time = self.previous_image_time
 
-    ## === USING THE PYREALSENSE2 API INSTEAD OF ROS2 WRAPPER === ##
+    ## === USING THE PYREALSENSE2 API INSTEAD OF ROS2 WRAPPER IN REAL WORLD === ##
     if not self.is_sim:
       # Configure depth and color streams
       self.pipeline = rs.pipeline()
@@ -186,17 +244,45 @@ class CarLocalizer(Node):
       self.image_queue = deque()
       self.euler_window = []
       self.create_timer(1/30, self.rs_pose_pub_callback)
+    self.pose_estimate_list = []
+    self.ground_truth_pose_list = []
 
   def destroy_node(self):
     if self.debug == True:
       self.video_output.release()
+    if not self.is_sim:
+      self.pipeline.stop()
 
-    self.pipeline.stop()
+      while self.image_queue:
+        time, image_np = self.image_queue.popleft()
+        cv2.imwrite(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/{time}.png", image_np)
+    
+    # Save pose estimates to debug directory
+    # generate df from pose_estimate_list
+    pose_est_df = pd.DataFrame(self.pose_estimate_list, columns=["time", "x", "y", "z", "roll", "pitch", "yaw"])
+    pose_est_df["time (sec)"] = pose_est_df["time"] / 1e9
+    # stabilise the roll, pitch, yaw values
+    pose_est_df = stabilise_euler_angles(pose_est_df, ["roll", "pitch", "yaw"])
+    pose_est_df.to_csv(f"{self.DEBUG_DIR}/pose_estimates.csv", index=False)
+    
 
-    while self.image_queue:
-      time, image_np = self.image_queue.popleft()
-      cv2.imwrite(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/{time}.png", image_np)
-      
+    gt_df = pd.DataFrame(self.ground_truth_pose_list, columns=["time", "x", "y", "z", "roll", "pitch", "yaw"])
+    gt_df["time (sec)"] = gt_df["time"] / 1e9
+    # stabilise the roll, pitch, yaw values
+    gt_df = stabilise_euler_angles(gt_df, ["roll", "pitch", "yaw"])
+    gt_df.to_csv(f"{self.DEBUG_DIR}/ground_truth.csv", index=False)
+
+    # for each x,y,z,roll,pitch,yaw generate a plot with the pose estimate and the ground truth
+    for val in ["x", "y", "z", "roll", "pitch", "yaw"]:
+      plt.figure(figsize=(10, 6))
+      plt.xlabel("Time (s)")
+      plt.ylabel(val)
+      sns.lineplot(x="time (sec)", y=val, data=pose_est_df, label="Pose estimation")
+      sns.lineplot(x="time (sec)", y=val, data=gt_df, label="Ground truth")
+      plt.tight_layout()
+      plt.savefig(f"{self.DEBUG_DIR}/{val}.png")
+      plt.close()
+    
     # Save camera parameters to debug directory
     np.savetxt(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/intrinsics.txt", self.color_intrinsics)
     np.savetxt(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/dist_coeffs.txt", self.color_dist_coeffs)
@@ -257,28 +343,89 @@ class CarLocalizer(Node):
     """
     Publish the estimated pose of the opponent (ROS2 Version)
     """
-    current_time = 1e9 * image.header.stamp.sec + image.header.stamp.nanosec
+    current_time = get_time_from_header(image.header, nanoseconds=True)
     image_np = self.bridge.imgmsg_to_cv2(image, desired_encoding="bgr8")
-    arucos = locate_aruco_poses(image_np, self.aruco_dictionary, self.marker_obj_points, self.color_intrinsics, self.color_dist_coeffs)
+    aruco_corners, aruco_poses = locate_aruco_poses(image_np, self.aruco_dictionary, self.marker_obj_points, self.color_intrinsics, self.color_dist_coeffs)
 
-    if len(arucos) > 0:
-      if self.opp_back_marker_id in arucos:
-        rvec, tvec = arucos[self.opp_back_marker_id]
+    if self.opp_back_marker_id in aruco_poses:
+      rvec, tvec = aruco_poses[self.opp_back_marker_id]
     
-        quaternion = get_quaternion_from_rodrigues(rvec)
+      quaternion = get_quaternion_from_rodrigues(rvec)
+      euler = conv.get_euler_from_quaternion(*quaternion, degrees=True)
 
-        # Publish the estimated pose
-        msg = PoseStamped()
-
-        msg.header = image.header
-        msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = tvec[0][0], tvec[1][0], tvec[2][0]
-        msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w = quaternion
+      # add the estimated pose to the list
+      # self.pose_estimate_list.append((*tvec.flatten(), *rvec.flatten()))
+      self.pose_estimate_list.append((current_time, *tvec.flatten(), *euler))
         
-        self.opp_estimated_pose_pub.publish(msg)
+      # print(f"Estimated pose: {tvec.flatten()}, {euler}")
+      # Publish the estimated pose
+      # msg = PoseStamped()
+
+      # msg.header = image.header
+      # msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = tvec[0][0], tvec[1][0], tvec[2][0]
+      # msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w = quaternion
       
-    if current_time - self.previous_pose_time > 34e6:
-      print(f"Current time: {current_time}, Time between two frames: {(current_time - self.previous_pose_time) / 1e9}")
-    self.previous_pose_time = current_time
+      # self.opp_estimated_pose_pub.publish(msg)
+    else:
+      self.pose_estimate_list.append((current_time, *([None] * 6)))
+    # if current_time - self.previous_pose_time > 0.034:
+    #   print(f"Current time: {current_time}, Time between two frames: {(current_time - self.previous_pose_time) / 1e9}")
+    # self.previous_pose_time = current_time
+
+  def agent_pose_callback(self, data: TFMessage):
+    """
+    Callback function for the agent's pose (simulation only)
+
+    This publishes the 3D world position (x,y,z) of the camera on the agent vehicle
+    """
+    camera_world_pos, camera_world_quat, header = GroundTruth.get_camera_world_pose(
+      data, self.agent_name, self.camera_name, 
+      self.SELECTED_CAMERA)
+    
+    if camera_world_pos is not None and camera_world_quat is not None:
+      msg = PoseStamped()
+      msg.header = header
+      msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = camera_world_pos
+      msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w = camera_world_quat
+
+      self.camera_pose_pub.publish(msg)
+  
+  def opponent_pose_callback(self, data: TFMessage):
+    """
+    Callback function for the opponent's pose (simulation only)
+
+    This publishes the 3D world position (x,y,z) of the ArUco marker on the opponent vehicle
+    """
+    aruco_world_pos, aruco_world_quat, header = GroundTruth.get_aruco_world_pose(data, self.opponent_name)
+    if aruco_world_pos is not None and aruco_world_quat is not None:
+      msg = PoseStamped()
+      msg.header = header
+      msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = aruco_world_pos
+      msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w = aruco_world_quat
+
+      self.aruco_pose_pub.publish(msg)
+
+  def ground_truth_pose_callback(self, ego_pose: PoseStamped, opp_pose: PoseStamped):
+    """
+    Callback function for the agent's pose (simulation only)
+
+    This publishes the 3D world position (x,y,z) of the camera on the agent vehicle
+    """
+    current_time = get_time_from_header(ego_pose.header, nanoseconds=True)
+    ego_pos = np.array([ego_pose.pose.position.x, ego_pose.pose.position.y, ego_pose.pose.position.z])
+    ego_rot = get_rotation_matrix_from_quaternion(ego_pose.pose.orientation.x, ego_pose.pose.orientation.y, ego_pose.pose.orientation.z, ego_pose.pose.orientation.w)
+
+    opp_pos = np.array([opp_pose.pose.position.x, opp_pose.pose.position.y, opp_pose.pose.position.z])
+    opp_rot = get_rotation_matrix_from_quaternion(opp_pose.pose.orientation.x, opp_pose.pose.orientation.y, opp_pose.pose.orientation.z, opp_pose.pose.orientation.w)
+
+    rel_pos_gt, rel_rot_gt = GroundTruth.get_ground_truth_relative_pose(
+      ego_pos, ego_rot, opp_pos, opp_rot)
+    
+    rel_rot_euler = conv.get_euler_from_rotation_matrix(rel_rot_gt, degrees=True)
+
+    # print(f"Ground truth relative position: {rel_pos_gt}, relative rotation: {rel_rot_euler}")
+    
+    self.ground_truth_pose_list.append((current_time, *rel_pos_gt, *rel_rot_euler))
 
   def camera_info_callback(self, data: CameraInfo):
     self.color_intrinsics = data.k.reshape(3, 3)

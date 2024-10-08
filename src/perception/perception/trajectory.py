@@ -32,12 +32,12 @@ class Trajectory(Node):
     self.vels = {
       "agent": 
         [
-          {"time": 1.0, "linear": 0.5, "angular": 0.0},
-          {"time": 5.0, "linear": -0.4, "angular": 0.0}
+          {"time": 1.0, "linear": 0.6, "angular": 0.0},
+          {"time": 3.0, "linear": 0.4, "angular": 0.2}
         ],
       "opponent": 
         [
-          {"time": 1.0, "linear": 0.5, "angular": 0.0},
+          {"time": 1.0, "linear": 0.3, "angular": 0.0},
           {"time": 7.0, "linear": -0.2, "angular": 0.0}
         ],
     }
@@ -151,7 +151,7 @@ class Trajectory(Node):
 
     Determines if the agent has settled before publishing velocity commands
     """
-    camera_world_pose, header = GroundTruth.get_camera_world_pose(
+    camera_world_pose, camera_world_rot, header = GroundTruth.get_camera_world_pose(
       data, self.agent_name, self.camera_name,
       self.SELECTED_CAMERA if not self.is_stereo else self.SELECTED_LEFT_CAMERA)
 
@@ -168,7 +168,7 @@ class Trajectory(Node):
 
     Determines if the opponent has settled before publishing velocity commands
     """
-    aruco_world_pose, header = GroundTruth.get_aruco_world_pose(data, self.opponent_name)
+    aruco_world_pose, camera_world_rot, header = GroundTruth.get_aruco_world_pose(data, self.opponent_name)
 
     self.prev_aruco_pose = self.aruco_pose
     self.aruco_pose = aruco_world_pose
@@ -214,10 +214,8 @@ class Trajectory(Node):
   def sim_clock_callback(self, data: Clock):
     if (self.start_agent_vel_pub and self.start_opp_vel_pub and self.start_agent_vel_time is not None and self.start_opp_vel_time is not None):
       time = get_time_from_clock(data)
-
       # Stop the vehicles after the evaluation time has passed
       if time >= self.start_time + self.eval_time:
-        print("Stopping vehicles")
         self.agent_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
         self.opp_vel_publisher.publish(self.create_twist_msg(0.0, 0.0))
         if time >= self.start_time + self.eval_time + self.END_BUFFER_TIME:

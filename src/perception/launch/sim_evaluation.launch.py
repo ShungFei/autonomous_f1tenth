@@ -207,7 +207,7 @@ def spawn_func(context, *args, **kwargs):
 
     return [
         gz_sim,
-        evaluation_node,
+        # evaluation_node,
         *spawn_model_from_xacro(
             xacro_file,
             name,
@@ -285,7 +285,7 @@ def spawn_func(context, *args, **kwargs):
                             ' destroyed the trajectory node')),
                     ExecuteProcess(
                         cmd=[[
-                            "pkill -f \"gz sim\"" # Simulation does not stop on its own when Shutdown event is emitted
+                            "pkill -f \"gz\"" # Simulation does not stop on its own when Shutdown event is emitted
                         ]],
                         shell=True
                     ),

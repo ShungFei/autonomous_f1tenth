@@ -197,7 +197,7 @@ def get_rodrigues_from_quaternion(qx, qy, qz, qw):
     rvec = np.array([x, y, z]) * theta
     return rvec
    
-def get_time_from_header(header: Header):
+def get_time_from_header(header: Header, nanoseconds=False):
   """
   Convert the time from a ROS header to seconds.
     
@@ -207,7 +207,10 @@ def get_time_from_header(header: Header):
   Output
       :return time: The time in seconds
   """
-  time = header.stamp.sec + header.stamp.nanosec * 1e-9
+  if nanoseconds:
+    time = header.stamp.sec * 1e9 + header.stamp.nanosec
+  else:
+    time = header.stamp.sec + header.stamp.nanosec * 1e-9
   return time
 
 def get_time_from_clock(clock: Clock):

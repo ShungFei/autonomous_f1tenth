@@ -159,6 +159,7 @@ class BEVProcessor():
 
       ego_poses = []
       opp_poses = []
+      # all_aruco_corners = []
 
       for image_file in sorted(image_files):
         # if image_file != '1727603151901157814.png':
@@ -166,25 +167,34 @@ class BEVProcessor():
         # check if the image ends with png or jpg or jpeg
         if (image_file.endswith(".png") or image_file.endswith(".jpg") or image_file.endswith(".jpeg")):
           # Load the images
+          time = image_file.strip(".png")
           image = cv2.imread(f"{process_sub_dir}/{image_file}")
-          aruco_poses = locate_aruco_poses(image, self.aruco_dictionary, self.marker_obj_points, intrinsics, dist_coeffs, output_all=True)
+          
+          aruco_corners, aruco_poses = locate_aruco_poses(image, self.aruco_dictionary, self.marker_obj_points, intrinsics, dist_coeffs, output_all=True)
+          # aruco_corners["time"] = time
+          # all_aruco_corners.append(aruco_corners)
+          
           # print(aruco_poses)
           if self.ego_aruco_id not in aruco_poses:
-            ego_poses.append((image_file.strip(".png"), *([None] * 10)))
+            ego_poses.append((time, *([None] * 10)))
           else:
             rvecs, tvecs, reproj_errors = aruco_poses[self.ego_aruco_id]
             rvec, tvec, quat, roll, pitch, yaw = self.select_best_pnp_pose(rvecs, tvecs, reproj_errors)
 
             # print(f"rvec: {rvec}, tvec: {tvec}, quat: {quat}, roll: {roll}, pitch: {pitch}, yaw: {yaw}")
-            ego_poses.append((image_file.strip(".png"), *quat, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
+            ego_poses.append((time, *quat, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
           
           if self.opp_aruco_id not in aruco_poses:
-            opp_poses.append((image_file.strip(".png"), *([None] * 10)))
+            opp_poses.append((time, *([None] * 10)))
           else:
             rvecs, tvecs, reproj_errors = aruco_poses[self.opp_aruco_id]
 
             rvec, tvec, quat, roll, pitch, yaw = self.select_best_pnp_pose(rvecs, tvecs, reproj_errors)
-            opp_poses.append((image_file.strip(".png"), *quat, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
+            opp_poses.append((time, *quat, *rvec.flatten().tolist(), *tvec.flatten().tolist()))
+      
+      # write all the aruco corners to a file
+      # aruco_df = pd.DataFrame(all_aruco_corners)
+      # aruco_df.to_csv(f"{process_sub_dir}/aruco_corners.csv", index=False)
       
       # Save the poses to csv files
       ego_df = pd.DataFrame(ego_poses, 

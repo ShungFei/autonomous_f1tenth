@@ -152,7 +152,7 @@ if __name__ == "__main__":
 
   parser.add_argument("--opp_back_aruco_id", type=int, default=15, help="ID of the ArUco marker on the back of the opponent car")
   parser.add_argument("--side_length", type=float, default=0.15, help="Side length of the ArUco markers")
-  parser.add_argument("--corner_ref_method", type=Literal["none", "subpix", "apriltag"], default="subpix", help="Corner refinement method")
+  parser.add_argument("--corner_ref_method", type=str, choices=['none', 'subpix', 'apriltag'], required=True, help="Corner refinement method")
 
   args = parser.parse_args()
 

@@ -345,7 +345,7 @@ class CarLocalizer(Node):
     """
     current_time = get_time_from_header(image.header, nanoseconds=True)
     image_np = self.bridge.imgmsg_to_cv2(image, desired_encoding="bgr8")
-    aruco_corners, aruco_poses = locate_aruco_poses(image_np, self.aruco_dictionary, self.marker_obj_points, self.color_intrinsics, self.color_dist_coeffs)
+    aruco_poses = locate_aruco_poses(image_np, self.aruco_dictionary, self.marker_obj_points, self.color_intrinsics, self.color_dist_coeffs)
 
     if self.opp_back_marker_id in aruco_poses:
       rvec, tvec = aruco_poses[self.opp_back_marker_id]

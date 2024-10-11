@@ -37,6 +37,28 @@ class GroundTruthMeasurements:
     self.ego_top_marker_to_ego_cam_rot = ego_top_marker_to_ego_cam_rot
     self.opp_top_marker_to_opp_back_marker_rot = opp_top_marker_to_opp_back_marker_rot
 
+class RollingParams:
+  def __init__(self, window=20, min_periods=1, center=True):
+    self.window = window
+    self.min_periods = min_periods
+    self.center = center
+
+class SavgolParams:
+  def __init__(self, window=20, polyorder=5):
+    self.window = window
+    self.polyorder = polyorder
+
+class LowessParams:
+  def __init__(self, frac=0.1, it=3):
+    self.frac = frac
+    self.it = it
+
+class SmoothingParams:
+  def __init__(self, rolling_window=20, savgol_window=20, savgol_polyorder=5, lowess_frac=0.1, lowess_it=3):
+    self.rolling = RollingParams(rolling_window, center=True)
+    self.savgol = SavgolParams(savgol_window, savgol_polyorder)
+    self.lowess = LowessParams(lowess_frac, lowess_it)
+
 def generate_df_from_monte_carlo(monte_carlo_results):
   df = pd.DataFrame([{
     "time": results["time"],
@@ -103,7 +125,7 @@ def read_all_runs(bev_paths, ego_paths, window_before_start_time=1):
     })
   return run_data
 
-def remove_unused_frames(poses_df: pd.DataFrame, start_time, window_before_start_time=1):
+def remove_unused_frames(poses_df: pd.DataFrame, start_time, window_before_start_time=1, reset_index=True):
   poses_df["time (sec)"] = poses_df["time"] / 1e9
   
   # Include a few frames before the trajectory start time
@@ -112,8 +134,9 @@ def remove_unused_frames(poses_df: pd.DataFrame, start_time, window_before_start
 
   if window_before_start_time >= 1:
     poses_df_start_time = pd.concat([poses_df.iloc[first_index - window_before_start_time:first_index], poses_df_start_time])
-
-  poses_df_start_time = poses_df_start_time.reset_index(drop=True)
+  
+  if reset_index:
+    poses_df_start_time = poses_df_start_time.reset_index(drop=True)
 
   # normalise the time from df to start at 0
   poses_df_start_time['time_norm (sec)'] = (poses_df_start_time['time (sec)'] - start_time)
@@ -214,7 +237,7 @@ def get_ground_truth_rel_pose_ego_cam_frame(bev_to_ego_top_marker_rvec, ego_top_
   # Get position of opponent back marker in BEV frame
   opp_back_in_bev_frame = get_opp_back_from_top_marker(bev_to_opp_top_marker_rvec, opp_top_marker_in_bev_frame, measurements)
 
-  # Get the relative position  of the opponent back marker in the BEV camera frame
+  # Get the relative position of the opponent back marker in the BEV camera frame
   rel_pos_bev_frame = opp_back_in_bev_frame - ego_cam_in_bev_frame
   # Convert the relative position to the ego camera frame
   rel_pos_ego_cam_frame = rotate_bev_frame_to_ego_cam_frame(bev_to_ego_top_marker_rvec, rel_pos_bev_frame, measurements)
@@ -252,6 +275,7 @@ def remove_nan_rows(run: list[dict]):
   run["tracking_df"] = run["tracking_df"][run["tracking_df"]["time (sec)"] <= last_bev_pose_time]
   run["tracking_df"] = run["tracking_df"].dropna().reset_index(drop=True)
 
+  # Trim the state estimation data to the last BEV pose time
   for state_est_method in ["kalman_ca", "kalman_cv", "rwr", "kalman_ca_depth_fusion"]:
     run[f"{state_est_method}_df"] = run[f"{state_est_method}_df"][run[f"{state_est_method}_df"]["time (sec)"] <= last_bev_pose_time]
     run[f"{state_est_method}_df"] = run[f"{state_est_method}_df"].dropna().reset_index(drop=True)
@@ -333,72 +357,79 @@ def process_run_data(run_data: list[dict], measurements: GroundTruthMeasurements
       run["raw"]["ego_bev_left_df"],
       run["raw"]["ego_bev_right_df"],
       ["tx", "ty", "tz", "roll", "pitch", "yaw"])
-
-    for smoothing_type in smoothing_types:
-      run[smoothing_type] = {
-        df_name: generate_smoothed_data(run["raw"][df_name], smoothing_type) \
-          for df_name in run["raw"]
-      }
-  
-    for smoothing_type in ["raw"] + smoothing_types:
-      run[smoothing_type]["rel_poses_left_df"] = compute_relative_pose(run[smoothing_type]["ego_bev_left_df"], run[smoothing_type]["opp_bev_left_df"], measurements)
-      run[smoothing_type]["rel_poses_right_df"] = compute_relative_pose(run[smoothing_type]["ego_bev_right_df"], run[smoothing_type]["opp_bev_right_df"], measurements)
+    
+    # Compute the relative poses
+    run["raw"]["rel_poses_left_df"] = compute_relative_pose(run["raw"]["ego_bev_left_df"], run["raw"]["opp_bev_left_df"], measurements)
+    run["raw"]["rel_poses_right_df"] = compute_relative_pose(run["raw"]["ego_bev_right_df"], run["raw"]["opp_bev_right_df"], measurements)
       
-      # Make the angle difference between consecutive frames less than 180 degrees
-      run[smoothing_type]["rel_poses_left_df"] = stabilise_euler_angles(run[smoothing_type]["rel_poses_left_df"], ["roll", "pitch", "yaw"], degrees=degrees)
-      run[smoothing_type]["rel_poses_right_df"] = stabilise_euler_angles(run[smoothing_type]["rel_poses_right_df"], ["roll", "pitch", "yaw"], degrees=degrees)
+    # Make the angle difference between consecutive frames less than 180 degrees
+    run["raw"]["rel_poses_left_df"] = stabilise_euler_angles(run["raw"]["rel_poses_left_df"], ["roll", "pitch", "yaw"], degrees=degrees)
+    run["raw"]["rel_poses_right_df"] = stabilise_euler_angles(run["raw"]["rel_poses_right_df"], ["roll", "pitch", "yaw"], degrees=degrees)
 
-      # Check if the Euler angle is larger or smaller than tracking_df by 180 degrees and correct
-      for df_name in ["rel_poses_left_df", "rel_poses_right_df"]:
-        run[smoothing_type][df_name] = correct_euler_offset(
-          run[smoothing_type][df_name],
-          run["tracking_df"],
-          ["roll", "pitch", "yaw"],
-          degrees=degrees
-        )
+    # Check if the Euler angle is larger or smaller than tracking_df by 180 degrees and correct
+    for df_name in ["rel_poses_left_df", "rel_poses_right_df"]:
+      run["raw"][df_name] = correct_euler_offset(
+        run["raw"][df_name],
+        run["tracking_df"],
+        ["roll", "pitch", "yaw"],
+        degrees=degrees
+      )
 
-      # generate the average relative poses
-      run[smoothing_type]["rel_poses_avg_df"] = generate_avg_bev_df(
-        run[smoothing_type]["rel_poses_left_df"], run[smoothing_type]["rel_poses_right_df"],
-        ["tx", "ty", "tz", "roll", "pitch", "yaw"])
+    # generate the average relative poses
+    run["raw"]["rel_poses_avg_df"] = generate_avg_bev_df(
+      run["raw"]["rel_poses_left_df"], run["raw"]["rel_poses_right_df"],
+      ["tx", "ty", "tz", "roll", "pitch", "yaw"])
+    
+    # Apply smoothing to all the pose DataFrames
+    for smoothing_type in smoothing_types:
+      run[smoothing_type] = {}
+      cols = ["tx", "ty", "tz", "roll", "pitch", "yaw"]
+      
+      for df_name in run["raw"]:
+        params = []
+        for col in cols:
+          if col in ["tx", "ty", "tz"]:
+            params.append(SmoothingParams(lowess_frac=15 / len(run["raw"][df_name]), lowess_it=1))
+          else:
+            params.append(SmoothingParams(lowess_frac=10 / len(run["raw"][df_name]), lowess_it=1))
+        run[smoothing_type][df_name] = generate_smoothed_data(run["raw"][df_name], cols, params, smoothing_type)
 
   return run_data
 
-def apply_rolling_mean(df: pd.DataFrame, src: str, dest: str | None = None, window=20, min_periods=1, center=True):
+def apply_rolling_mean(df: pd.DataFrame, src: str, dest: str | None = None, params: RollingParams = RollingParams()):
   if dest is None:
     dest = src
-  df.loc[:, dest] = df[src].rolling(window=window, min_periods=min_periods, center=center).mean()
+  df.loc[:, dest] = df[src].rolling(window=params.window, min_periods=params.min_periods, center=params.center).mean()
 
-def apply_savgol_filter(df: pd.DataFrame, src: str, dest: str | None = None, window=20, polyorder=5):
+def apply_savgol_filter(df: pd.DataFrame, src: str, dest: str | None = None, params: SavgolParams = SavgolParams()):
   if dest is None:
     dest = src
-  df.loc[:, dest] = savgol_filter(df[src], window, polyorder)
+  df.loc[:, dest] = savgol_filter(df[src], params.window, params.polyorder)
 
-def apply_lowess_smoothing(df: pd.DataFrame, src: str, dest: str | None = None, frac=0.1):
+def apply_lowess_smoothing(df: pd.DataFrame, src: str, dest: str | None = None, params: LowessParams = LowessParams()):
   if dest is None:
     dest = src
-  df.loc[:, dest] = lowess(df[src], df["time_norm (sec)"], frac=frac)[:, 1]
+  df.loc[:, dest] = lowess(df[src], df["time_norm (sec)"], frac=params.frac, it=params.it)[:, 1]
 
-def generate_smoothed_data(poses_df: pd.DataFrame, func: Literal["savgol", "rolling", "lowess"],
-                            window=20, polyorder=5, frac=0.1, inplace=False):
+def generate_smoothed_data(poses_df: pd.DataFrame, cols: list[str], params: list[SmoothingParams],
+                            func: Literal["savgol", "rolling", "lowess"], inplace=False):
   """
   Generate smoothed poses data using filters
   """
   if not inplace:
     poses_df = poses_df.copy()
 
-  pos_columns = ['tx', 'ty', 'tz']
-  rot_columns = ['roll', 'pitch', 'yaw']
-  for col in pos_columns + rot_columns:
+  for col, param in zip(cols, params):
     if func == "savgol":
-      apply_savgol_filter(poses_df, col, window=window, polyorder=polyorder)
+      apply_savgol_filter(poses_df, src=col, params=param.savgol)
     elif func == "rolling":
-      apply_rolling_mean(poses_df, col, window=window)
+      apply_rolling_mean(poses_df, src=col, params=param.rolling)
     elif func == "lowess":
-      apply_lowess_smoothing(poses_df, col, frac=frac)
+      apply_lowess_smoothing(poses_df, src=col, params=param.lowess)
 
-  poses_df = stabilise_euler_angles(poses_df, rot_columns)
+  poses_df = stabilise_euler_angles(poses_df, ["roll", "pitch", "yaw"], degrees=True)
 
+  # Generate Rodrigues and quaternion representations
   poses_df["ax"], poses_df["ay"], poses_df["az"] = \
     zip(*poses_df.apply(lambda row: conv.get_rodrigues_from_euler(
       *row[["roll", "pitch", "yaw"]], degrees=True), axis=1))

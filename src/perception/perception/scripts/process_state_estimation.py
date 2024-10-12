@@ -82,18 +82,19 @@ class StateEstimator():
 
       # Update the Kalman filter with the closest measured pose before the expected time (within the interval of one frame)
       i = measured_poses.index.get_indexer([expected_time], method="ffill", tolerance=1e9 / self.frame_rate)[0]
-      
       # Skip the update step if there is no measured pose before the expected time
       if i != -1 and not pd.isna(measured_poses.iloc[i][["qx", "qy", "qz", "qw", "tx", "ty", "tz", "roll", "pitch", "yaw"]]).any():
         if is_depth_fusion:
-          # Update the measurement matrix to only update the position
-          kf.H[3:, 6 if is_constant_velocity_model else 9:9 if is_constant_velocity_model else 12] = np.zeros((3, 3))
-          
-          depth_position = measured_poses.iloc[i][["depth_tx", "depth_ty", "depth_tz"]].values
-          kf.update(np.concatenate((depth_position, np.zeros(3))))
-          
-          # Reset the measurement matrix to update position and orientation
-          kf.H[3:, 6 if is_constant_velocity_model else 9:9 if is_constant_velocity_model else 12] = np.eye(3)
+
+          depth_position: np.ndarray = measured_poses.iloc[i][["depth_tx", "depth_ty", "depth_tz"]].values
+
+          # check if the depth position is not nan
+          if not np.isnan(depth_position).any():
+            # Update the measurement matrix to only update the position
+            kf.H[3:, 6 if is_constant_velocity_model else 9:9 if is_constant_velocity_model else 12] = np.zeros((3, 3))
+            kf.update(np.concatenate((depth_position, np.zeros(3))))
+            # Reset the measurement matrix to update position and orientation
+            kf.H[3:, 6 if is_constant_velocity_model else 9:9 if is_constant_velocity_model else 12] = np.eye(3)
 
         pose = measured_poses.iloc[i][["tx", "ty", "tz", "roll", "pitch", "yaw"]].values
         kf.update(pose)
@@ -114,7 +115,7 @@ class StateEstimator():
     # State covariance
     kf.P = np.diag([1, 1, 1, 2, 2, 2, 1, 1, 1, 2, 2, 2])
     # Process noise
-    q = Q_discrete_white_noise(dim=2, dt=dt, var=0.05)
+    q = Q_discrete_white_noise(dim=2, dt=dt, var=10)
 
     q_second_order = np.array([[q[0, 0], 0, 0, q[0, 1], 0, 0],
                                 [0, q[0, 0], 0, 0, q[0, 1], 0],
@@ -127,7 +128,7 @@ class StateEstimator():
     kf.Q = block_diag(q_second_order, q_second_order)
     
     # Measurement noise
-    kf.R = np.eye(6) * 0.05
+    kf.R = np.diag([0.05, 0.05, 0.05, 4, 4, 4])
 
     # Transition matrix
     a_t = np.array([[1, 0, 0, dt, 0, 0],
@@ -176,7 +177,7 @@ class StateEstimator():
     kf.Q = block_diag(q_second_order, q_second_order)
     
     # Measurement noise
-    kf.R = np.diag([0.05, 0.05, 0.05, 4, 4, 4])
+    kf.R = np.diag([0.1, 0.1, 0.1, 3, 3, 3])
 
     # Transition matrix
     a_t = np.array([[1, 0, 0, dt, 0, 0, 0.5*dt**2, 0, 0],

@@ -59,6 +59,7 @@ class TrackingProcessor():
         continue
       
       intrinsics = np.loadtxt(f"{process_sub_dir}/intrinsics.txt")
+      depth_intrinsics = np.loadtxt(f"{process_sub_dir}/../depth/intrinsics.txt")
       dist_coeffs = np.loadtxt(f"{process_sub_dir}/dist_coeffs.txt")
 
       # Make sure time index is in integer format
@@ -83,13 +84,13 @@ class TrackingProcessor():
           center_y = sum([corner[1] for corner in corners[self.opp_back_aruco_id][0]]) / 4
 
           # Get the relative position of the center of the ArUco marker from the depth feed
-          depth_relative_position = self.get_relative_position_from_depth_feed(center_x, center_y, time, intrinsics, process_sub_dir)
+          depth_relative_position = self.get_relative_position_from_depth_feed(center_x, center_y, time, depth_intrinsics, process_sub_dir)
 
           df.loc[time] = [*quaternion, *rvec.flatten(), *tvec.flatten(), *depth_relative_position]
 
       df.to_csv(f"{process_sub_dir}/opp_rel_poses.csv", index=True)
 
-  def get_relative_position_from_depth_feed(self, center_x, center_y, frame_timestamp, intrinsics, process_sub_dir):
+  def get_relative_position_from_depth_feed(self, center_x, center_y, frame_timestamp, depth_intrinsics, process_sub_dir):
     # Use manually derived homography matrix from depth_feed.ipynb to align the color image with the depth image
     H = np.array([[ 4.3093820234694441e-01, -1.0743690101400583e-02, 1.9988026083233976e+02],
                   [-3.4476255716975181e-03,  4.4871665720989579e-01, 1.0526304884013102e+02],
@@ -116,19 +117,20 @@ class TrackingProcessor():
     depth = depth_image[int(depth_y), int(depth_x)] / 1000  # Convert mm to m
 
     # Get the 3D coordinates of the center of the marker in the color camera frame
-    relative_position = self.get_3d_coordinates((center_x, center_y), depth, intrinsics, extrinsics_r, extrinsics_t)
+    relative_position = self.get_3d_coordinates((depth_x, depth_y), depth, depth_intrinsics, extrinsics_r, extrinsics_t)
+
     return relative_position
 
-  def get_3d_coordinates(self, pixel, depth, instrinsics, extrinsics_r, extrinsics_t):
+  def get_3d_coordinates(self, pixel, depth, intrinsics, extrinsics_r, extrinsics_t):
     u, v = pixel
 
     if depth == 0:
         return [None] * 3
 
-    fx_depth = instrinsics[0, 0]
-    fy_depth = instrinsics[1, 1]
-    cx_depth = instrinsics[0, 2]
-    cy_depth = instrinsics[1, 2]
+    fx_depth = intrinsics[0, 0]
+    fy_depth = intrinsics[1, 1]
+    cx_depth = intrinsics[0, 2]
+    cy_depth = intrinsics[1, 2]
 
     # Calculate 3D coordinates in the depth camera frame
     X_depth = (u - cx_depth) * depth / fx_depth
@@ -136,7 +138,6 @@ class TrackingProcessor():
 
     # 3D point in the depth camera's frame
     P_depth = np.array([X_depth, Y_depth, depth])
-
     # Transform point from depth camera frame to color camera frame
     P_color = extrinsics_r @ P_depth + extrinsics_t
 

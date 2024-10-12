@@ -6,8 +6,10 @@ import cv2
 import numpy as np
 import pandas as pd
 from sympy import N
+from perception.scripts import ground_truth_real
 from perception.util.aruco import locate_aruco_poses
 from perception.util.conversion import get_quaternion_from_rodrigues
+import perception.util.conversion as conv
 
 class TrackingProcessor():
   """
@@ -67,17 +69,21 @@ class TrackingProcessor():
       df.index.name = "time"
       df.index = df.index.astype(int)
 
+      previous_euler = None
       for time in df.index:
         # Load the images
         image = cv2.imread(f"{process_sub_dir}/{time}.png")
-        arucos, corners = locate_aruco_poses(image, self.aruco_dictionary, self.marker_obj_points, intrinsics, 
-          dist_coeffs, return_corners=True, corner_ref_method=self.corner_ref_method)
-        if self.opp_back_aruco_id not in arucos:
-          df.loc[time] = [None] * 13
+        aruco_poses, corners = locate_aruco_poses(image, self.aruco_dictionary, self.marker_obj_points, intrinsics, 
+          dist_coeffs, output_all=False, return_corners=True, corner_ref_method=self.corner_ref_method, pnp_method=cv2.SOLVEPNP_SQPNP)
         
+        if self.opp_back_aruco_id not in aruco_poses:
+          df.loc[time] = [None] * 13
         else:
-          rvec, tvec = arucos[self.opp_back_aruco_id]
+          # rvecs, tvecs, reproj_errors = aruco_poses[self.opp_back_aruco_id]
+          rvec, tvec = aruco_poses[self.opp_back_aruco_id]
+          # rvec, tvec, quaternion, euler = self.get_pose_continuity_constraint(rvecs, tvecs, reproj_errors, None)
           quaternion = get_quaternion_from_rodrigues(rvec)
+          euler = conv.get_euler_from_quaternion(*quaternion, degrees=True)
 
           # Get the image coordinates of the center of the ArUco marker
           center_x = sum([corner[0] for corner in corners[self.opp_back_aruco_id][0]]) / 4
@@ -88,8 +94,46 @@ class TrackingProcessor():
 
           df.loc[time] = [*quaternion, *rvec.flatten(), *tvec.flatten(), *depth_relative_position]
 
-      df.to_csv(f"{process_sub_dir}/opp_rel_poses.csv", index=True)
+          previous_euler = euler
 
+      df.to_csv(f"{process_sub_dir}/opp_rel_poses.csv", index=True)
+  
+  def get_pose_continuity_constraint(self, rvecs, tvecs, reproj_errors, previous_euler=None)-> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    if previous_euler is None:
+      # get the pose that minimises the reprojection error
+      min_error_idx = np.argmin(reproj_errors)
+      rvec, tvec = rvecs[min_error_idx], tvecs[min_error_idx]
+      quaternion = get_quaternion_from_rodrigues(rvec)
+      euler = conv.get_euler_from_quaternion(*quaternion, degrees=True)
+      return rvec, tvec, quaternion, euler
+    
+    chosen_rvec, chosen_tvec = rvecs[0], tvecs[0]
+    chosen_quat = get_quaternion_from_rodrigues(chosen_rvec)
+    chosen_euler = np.array(conv.get_euler_from_quaternion(*chosen_quat, degrees=True))
+    chosen_euler = np.array([
+      ground_truth_real.find_closest_equiv_angle(chosen_angle, previous_angle) \
+      for chosen_angle, previous_angle in zip(chosen_euler, previous_euler)
+    ])
+    chosen_angle_dist = np.linalg.norm(np.array(chosen_euler) - np.array(previous_euler))
+
+    for i in range(1, len(rvecs)):
+      rvec, tvec = rvecs[i], tvecs[i]
+      quaternion = np.array(get_quaternion_from_rodrigues(rvec))
+      euler = conv.get_euler_from_quaternion(*quaternion, degrees=True)
+      euler = np.array([
+        ground_truth_real.find_closest_equiv_angle(chosen_angle, previous_angle) \
+        for chosen_angle, previous_angle in zip(euler, previous_euler)
+      ])
+      dist = np.linalg.norm(np.array(euler) - np.array(previous_euler))
+
+      if dist < chosen_angle_dist:
+        chosen_rvec, chosen_tvec = rvec, tvec
+        chosen_quat = quaternion
+        chosen_euler = euler
+        chosen_angle_dist = dist
+    
+    return chosen_rvec, chosen_tvec, chosen_quat, chosen_euler
+  
   def get_relative_position_from_depth_feed(self, center_x, center_y, frame_timestamp, depth_intrinsics, process_sub_dir):
     # Use manually derived homography matrix from depth_feed.ipynb to align the color image with the depth image
     H = np.array([[ 4.3093820234694441e-01, -1.0743690101400583e-02, 1.9988026083233976e+02],

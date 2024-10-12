@@ -17,6 +17,7 @@ import pyrealsense2 as rs
 from queue import Queue
 from perception.util.aruco import locate_aruco_poses
 import perception.util.conversion as conv
+from perception_interfaces.msg import StateEstimateStamped
 from matplotlib import pyplot as plt
 import seaborn as sns
 
@@ -155,6 +156,12 @@ class CarLocalizer(Node):
         0.01
       )
       self.gt_sub.registerCallback(self.ground_truth_pose_callback)
+
+      self.ground_truth_pose_pub = self.create_publisher(
+        StateEstimateStamped,
+        f'{self.opponent_name}/ground_truth/relative_pose',
+        10
+      )
 
     self.color_intrinsics = None
     self.color_dist_coeffs = None
@@ -359,13 +366,13 @@ class CarLocalizer(Node):
         
       # print(f"Estimated pose: {tvec.flatten()}, {euler}")
       # Publish the estimated pose
-      # msg = PoseStamped()
+      msg = PoseStamped()
 
-      # msg.header = image.header
-      # msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = tvec[0][0], tvec[1][0], tvec[2][0]
-      # msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w = quaternion
+      msg.header = image.header
+      msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = tvec[0][0], tvec[1][0], tvec[2][0]
+      msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w = quaternion
       
-      # self.opp_estimated_pose_pub.publish(msg)
+      self.opp_estimated_pose_pub.publish(msg)
     else:
       self.pose_estimate_list.append((current_time, *([None] * 6)))
     # if current_time - self.previous_pose_time > 0.034:
@@ -426,6 +433,12 @@ class CarLocalizer(Node):
     # print(f"Ground truth relative position: {rel_pos_gt}, relative rotation: {rel_rot_euler}")
     
     self.ground_truth_pose_list.append((current_time, *rel_pos_gt, *rel_rot_euler))
+
+    msg = StateEstimateStamped()
+    msg.header = ego_pose.header
+    msg.position.x, msg.position.y, msg.position.z = rel_pos_gt
+    msg.orientation.x, msg.orientation.y, msg.orientation.z = rel_rot_euler
+    self.ground_truth_pose_pub.publish(msg)
 
   def camera_info_callback(self, data: CameraInfo):
     self.color_intrinsics = data.k.reshape(3, 3)

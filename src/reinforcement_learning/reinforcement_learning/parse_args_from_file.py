@@ -27,6 +27,7 @@ def parse_args_from_file():
     #     reward_range=3,
     #     collision_range=0.2,
     #     observation_mode='lidar_only',
+    #     state_estimation_mode='kalman_filter_ca',
 
     #     #NOT USED
     #     max_goals=500 

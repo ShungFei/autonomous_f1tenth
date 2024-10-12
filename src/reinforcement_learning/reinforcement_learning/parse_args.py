@@ -31,6 +31,7 @@ def __declare_params():
             ('reward_range', 3),
             ('collision_range', 0.2),
             ('observation_mode', 'lidar_only'),
+            ('opponent_state_estimation_mode', 'kalman_filter_ca'),
             ('max_goals', 500),
             ('num_lidar_points', 10),
 
@@ -72,6 +73,7 @@ def __get_env_params(param_node: Node):
         'reward_range',
         'collision_range',
         'observation_mode',
+        'opponent_state_estimation_mode',
         'max_goals',
         'ftg_car_name',
         'num_lidar_points'

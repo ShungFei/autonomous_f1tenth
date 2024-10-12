@@ -45,8 +45,8 @@ class Controller(Node):
         ##### Observation configuration ######################
 
         self.IS_AUTOENCODER_ALG = True
-        self.LIDAR_PROCESSING:Literal["avg","avg_w_consensus","pretrained_ae", "raw"] = 'raw'
-        self.LIDAR_POINTS = 683 #10, 683
+        self.LIDAR_PROCESSING:Literal["avg","avg_w_consensus","pretrained_ae", "raw"] = 'avg_w_consensus'
+        self.LIDAR_POINTS = 16 #10, 683
         self.LIDAR_OBS_STACK_SIZE = 1
 
         #---------------------------------------------

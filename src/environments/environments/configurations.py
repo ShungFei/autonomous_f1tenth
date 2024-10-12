@@ -42,5 +42,5 @@ class CarBeatEnvironmentConfig(EnvironmentConfig):
     ftg_car_name: str
     track: str
     observation_mode: str
+    opponent_state_estimation_mode: str
     max_goals: int
-    num_lidar_points: int

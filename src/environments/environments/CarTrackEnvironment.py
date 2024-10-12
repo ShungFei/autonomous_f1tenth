@@ -57,7 +57,7 @@ class CarTrackEnvironment(F1tenthEnvironment):
     """
 
     def __init__(self, 
-                 car_name, 
+                 car_name = "f1tenth", 
                  reward_range=0.5, 
                  max_steps=3000, 
                  collision_range=0.2, 
@@ -303,9 +303,8 @@ class CarTrackEnvironment(F1tenthEnvironment):
         self.full_current_state = full_state
         self.call_step(pause=True)
 
-        info = {}
+        info = {"index": index}
 
-        # get track progress related info
         # set new track model if its multi track
         if self.is_multi_track:
             self.track_model = self.all_track_models[self.current_track_key]
@@ -491,8 +490,8 @@ class CarTrackEnvironment(F1tenthEnvironment):
 
         # Add extra observation:
         extra_observation = []
-        for extra_observation in self.EXTRA_OBSERVATIONS:
-            match extra_observation:
+        for observation in self.EXTRA_OBSERVATIONS:
+            match observation:
                 case 'prev_ang_vel':
                     if self.full_current_state:
                         extra_observation += [self.full_current_state[7]]
@@ -611,7 +610,7 @@ class CarTrackEnvironment(F1tenthEnvironment):
             new_x, new_y, _, _ = self.track_waypoints[(self.start_waypoint_index + self.goals_reached) % len(self.track_waypoints)]
             self.goal_position = [new_x, new_y]
 
-            self.update_goal_service(new_x, new_y)
+            self.update_goal_service(new_x, new_y, self.NAME)
 
             self.steps_since_last_goal = 0
         
@@ -653,7 +652,7 @@ class CarTrackEnvironment(F1tenthEnvironment):
             new_x, new_y, _, _ = self.track_waypoints[(self.start_waypoint_index + self.goals_reached) % len(self.track_waypoints)]
             self.goal_position = [new_x, new_y]
 
-            self.update_goal_service(new_x, new_y)
+            self.update_goal_service(new_x, new_y, self.NAME)
 
             self.steps_since_last_goal = 0
 
@@ -692,12 +691,13 @@ class CarTrackEnvironment(F1tenthEnvironment):
 
         return future.result()
 
-    def update_goal_service(self, x, y):
+    def update_goal_service(self, x, y, car_name):
         """
         Reset the goal position
         """
 
         request = Reset.Request()
+        request.car_name = car_name
         request.gx = x
         request.gy = y
         request.flag = "goal_only"

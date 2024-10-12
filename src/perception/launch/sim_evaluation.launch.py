@@ -149,6 +149,7 @@ def spawn_func(context, *args, **kwargs):
     stereo_camera_name = LaunchConfiguration("stereo_camera_name").perform(context)
     opponent_name = LaunchConfiguration("opponent_name").perform(context)
     is_stereo = LaunchConfiguration("stereo").perform(context).lower()
+    fps = int(LaunchConfiguration("fps").perform(context))
 
     debug = LaunchConfiguration("debug").perform(context).lower() == "true"
     eval_time = float(LaunchConfiguration("eval_time").perform(context))
@@ -234,7 +235,7 @@ def spawn_func(context, *args, **kwargs):
                     "debug": debug,
                     "debug_dir": debug_dir,
                     "opponent_name": opponent_name,
-
+                    "fps": fps,
                 }
             ],
             emulate_tty=True,
@@ -327,6 +328,10 @@ def generate_launch_description():
         name="stereo", description="stereo camera or not", default_value="false"
     )
 
+    fps_arg = DeclareLaunchArgument(
+        name="fps", description="frames per second", default_value="30"
+    )
+
     debug_arg = DeclareLaunchArgument(
         name="debug", description="debug mode", default_value="false"
     )
@@ -366,6 +371,7 @@ def generate_launch_description():
             name_arg,
             stereo_arg,
             camera_name_arg,
+            fps_arg,
             debug_arg,
             eval_time_arg,
             stereo_camera_name_arg,

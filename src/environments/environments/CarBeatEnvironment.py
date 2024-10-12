@@ -63,13 +63,13 @@ class CarBeatEnvironment(CarTrackEnvironment):
         
         super().__init__(rl_car_name, reward_range, max_steps, collision_range, step_length, track)
         # Perception state estimates -------------------------------------
-        self.state_format = []
         self.opponent_state_estimation_mode = opponent_state_estimation_mode
         match opponent_state_estimation_mode:
             case 'none':
                 self.latest_opponent_state_estimate = None
+                self.state_length = 0
             case 'raw_marker_pose':
-                self.state_format.append('opponent_pose')
+                self.state_length = 3
                 self.latest_opponent_state_estimate = None
                 self.state_estimate_sub = self.create_subscription(
                     PoseStamped,
@@ -78,7 +78,7 @@ class CarBeatEnvironment(CarTrackEnvironment):
                     10
                 )
             case 'kalman_filter_ca':
-                self.state_format.append('full_opponent_state')
+                self.state_length = 9
                 self.latest_opponent_state_estimate = None
                 self.state_estimate_sub = self.create_subscription(
                     StateEstimateStamped,
@@ -88,12 +88,13 @@ class CarBeatEnvironment(CarTrackEnvironment):
                 )
             case 'ground_truth':
                 # TODO: Add ground truth velocity
-                self.state_format.append('opponent_pose')
+                self.state_length = 3
                 self.latest_opponent_state_estimate = None
                 self.pose = self.create_subscription(
                     StateEstimateStamped,
                     f'{ftg_car_name}/ground_truth/relative_pose',
                     lambda data: setattr(self, 'latest_opponent_state_estimate', data),
+                    10
                 )
         
         self.latest_opponent_pose = None
@@ -103,7 +104,6 @@ class CarBeatEnvironment(CarTrackEnvironment):
             lambda data: setattr(self, 'latest_opponent_pose', data),
             10
         )
-        self.state_length = 3 if self.state_format == 'opponent_pose' else 9
         self.OBSERVATION_SIZE += self.state_length
 
         # Environment Details ----------------------------------------
@@ -159,7 +159,7 @@ class CarBeatEnvironment(CarTrackEnvironment):
                 _, rotation_y, _ = get_euler_from_quarternion(opp_state.pose.orientation.w, opp_state.pose.orientation.x, opp_state.pose.orientation.y, opp_state.pose.orientation.z)
                 state_observation += [opp_state.pose.position.x, opp_state.pose.position.z, rotation_y]
             elif self.opponent_state_estimation_mode == 'ground_truth':
-                state_observation += [opp_state.pose.position.x, opp_state.pose.position.z, opp_state.pose.orientation.y]
+                state_observation += [opp_state.position.x, opp_state.position.y, opp_state.orientation.z]
             else:
                 state_observation += [opp_state.position.x, opp_state.position.z,
                                     opp_state.linear_velocity.x, opp_state.linear_velocity.z,

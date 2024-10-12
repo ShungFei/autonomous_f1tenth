@@ -113,6 +113,11 @@ class CarBeatEnvironment(CarTrackEnvironment):
         # Goal/Track Info -----------------------------------------------
         self.ftg_car_name = ftg_car_name
         self.is_over_taken = False
+        self.old_t_ego = None
+        self.old_t_opponent = None
+        self.t_ego_laps = 0
+        self.t_opponent_laps = 0
+        self.is_first_reward_since_reset = True
         self.ftg_goals_reached = 0
         self.ftg_start_waypoint_index = 0
         self.ftg_offset = 0
@@ -124,7 +129,6 @@ class CarBeatEnvironment(CarTrackEnvironment):
         
         self.ftg_offset = np.random.randint(8, 12)
         self.ftg_goals_reached = 0
-        self.is_over_taken = False
 
         # Starting point for the ftg car
         if self.is_evaluating: # This check exists for ego vehicle in CarTrackEnvironment so do for consistency
@@ -145,6 +149,13 @@ class CarBeatEnvironment(CarTrackEnvironment):
             goal_y=goal_y,
             car_name=self.OPPONENT_NAME
         )
+
+        self.is_over_taken = False # Needs to come after the opponent vehicle is reset, or there may be an accidental "overtaking"
+        self.old_t_ego = None
+        self.old_t_opponent = None
+        self.t_ego_laps = 0
+        self.t_opponent_laps = 0
+        self.is_first_reward_since_reset = True
 
         return state, info
 
@@ -197,14 +208,29 @@ class CarBeatEnvironment(CarTrackEnvironment):
 
             # self.update_goal_service(goal_x, goal_y, self.OPPONENT_NAME)
 
-        # If ego car has overtaken opponent car
+        # If ego car has overtaken opponent car (making sure to account for cases where the track loops back on itself)
         t_ego = self.track_model.get_closest_point_on_spline(next_state[:2], t_only=True)
         t_opponent = self.track_model.get_closest_point_on_spline(latest_opponent_xy, t_only=True)
-        if t_ego > t_opponent and not self.is_over_taken:
+
+        if self.is_first_reward_since_reset:
+            if t_ego > t_opponent:
+                self.t_ego_laps -= 1
+        elif abs(self.old_t_opponent - t_opponent) > 0.8:
+            self.t_opponent_laps += 1 if self.old_t_opponent > t_opponent else -1
+        elif abs(self.old_t_ego - t_ego) > 0.8:
+            self.t_ego_laps += 1 if self.old_t_ego > t_ego else -1
+
+        self.is_first_reward_since_reset = False
+
+        print(f'Ego: {self.t_ego_laps + t_ego}, Opp: {self.t_opponent_laps + t_opponent}')
+        if not self.is_over_taken and self.t_ego_laps + t_ego > self.t_opponent_laps + t_opponent:
             print(f'RL Car has overtaken FTG Car')
-            reward += 200
+            reward += 100
 
             # Ensure overtaking won't happen again
             self.is_over_taken = True
-            
+
+        self.old_t_ego = t_ego
+        self.old_t_opponent = t_opponent
+        
         return reward, reward_info

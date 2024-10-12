@@ -178,7 +178,11 @@ class CarBeatEnvironment(CarTrackEnvironment):
         if not self.latest_opponent_pose:
             return reward, reward_info
         
-        latest_opponent_translation = [tf for tf in self.latest_opponent_pose.transforms if tf.child_frame_id == self.ftg_car_name][0].transform.translation
+        latest_opponent_translation = [tf for tf in self.latest_opponent_pose.transforms if tf.child_frame_id == self.ftg_car_name]
+        if latest_opponent_translation == []:
+            return reward, reward_info
+        
+        latest_opponent_translation = latest_opponent_translation[0].transform.translation
         latest_opponent_xy = [latest_opponent_translation.x, latest_opponent_translation.y]
 
         ftg_current_distance = math.dist(self.ftg_goal_position, latest_opponent_xy)

@@ -3,6 +3,7 @@ import numpy as np
 from environments.CarTrackEnvironment import CarTrackEnvironment
 from environments.util import get_euler_from_quarternion
 from geometry_msgs.msg import PoseStamped
+from tf2_msgs.msg import TFMessage
 from perception_interfaces.msg import StateEstimateStamped
 
 class CarBeatEnvironment(CarTrackEnvironment):
@@ -97,7 +98,7 @@ class CarBeatEnvironment(CarTrackEnvironment):
         
         self.latest_opponent_pose = None
         self.opponent_ground_truth_pose_sub = self.create_subscription(
-            PoseStamped,
+            TFMessage,
             f'{ftg_car_name}/pose',
             lambda data: setattr(self, 'latest_opponent_pose', data),
             10
@@ -110,6 +111,8 @@ class CarBeatEnvironment(CarTrackEnvironment):
         # self.MAX_GOALS = max_goals # Unused
 
         # Goal/Track Info -----------------------------------------------
+        self.ftg_car_name = ftg_car_name
+        self.is_over_taken = False
         self.ftg_goals_reached = 0
         self.ftg_start_waypoint_index = 0
         self.ftg_offset = 0
@@ -121,6 +124,7 @@ class CarBeatEnvironment(CarTrackEnvironment):
         
         self.ftg_offset = np.random.randint(8, 12)
         self.ftg_goals_reached = 0
+        self.is_over_taken = False
 
         # Starting point for the ftg car
         if self.is_evaluating: # This check exists for ego vehicle in CarTrackEnvironment so do for consistency
@@ -154,7 +158,7 @@ class CarBeatEnvironment(CarTrackEnvironment):
                 # Convert quaternion to euler angle
                 _, rotation_y, _ = get_euler_from_quarternion(opp_state.pose.orientation.w, opp_state.pose.orientation.x, opp_state.pose.orientation.y, opp_state.pose.orientation.z)
                 state_observation += [opp_state.pose.position.x, opp_state.pose.position.z, rotation_y]
-            if self.opponent_state_estimation_mode == 'ground_truth':
+            elif self.opponent_state_estimation_mode == 'ground_truth':
                 state_observation += [opp_state.pose.position.x, opp_state.pose.position.z, opp_state.pose.orientation.y]
             else:
                 state_observation += [opp_state.position.x, opp_state.position.z,
@@ -173,8 +177,11 @@ class CarBeatEnvironment(CarTrackEnvironment):
 
         if not self.latest_opponent_pose:
             return reward, reward_info
+        
+        latest_opponent_translation = [tf for tf in self.latest_opponent_pose.transforms if tf.child_frame_id == self.ftg_car_name][0].transform.translation
+        latest_opponent_xy = [latest_opponent_translation.x, latest_opponent_translation.y]
 
-        ftg_current_distance = math.dist(self.ftg_goal_position, self.latest_opponent_pose[:2])
+        ftg_current_distance = math.dist(self.ftg_goal_position, latest_opponent_xy)
 
         # # Keeping track of FTG car goal number
         if ftg_current_distance < self.REWARD_RANGE:
@@ -184,18 +191,16 @@ class CarBeatEnvironment(CarTrackEnvironment):
             goal_x, goal_y, _, _ = self.track_waypoints[(self.ftg_start_waypoint_index + self.ftg_goals_reached) % len(self.track_waypoints)]
             self.ftg_goal_position = [goal_x, goal_y]
 
-            self.update_goal_position(goal_x, goal_y, self.OPPONENT_NAME)
-
+            # self.update_goal_service(goal_x, goal_y, self.OPPONENT_NAME)
 
         # If ego car has overtaken opponent car
-        t_ego = self.track_model.get_closest_point_on_spline(next_state[:2], t_only=False)
-        t_opponent = self.track_model.get_closest_point_on_spline(self.latest_opponent_pose[:2], t_only=False)
-        print(f'ego: {t_ego}, opp: {t_opponent}')
-        if t_ego > t_opponent:
+        t_ego = self.track_model.get_closest_point_on_spline(next_state[:2], t_only=True)
+        t_opponent = self.track_model.get_closest_point_on_spline(latest_opponent_xy, t_only=True)
+        if t_ego > t_opponent and not self.is_over_taken:
             print(f'RL Car has overtaken FTG Car')
             reward += 200
 
             # Ensure overtaking won't happen again
-            self.ftg_goals_reached += 500
+            self.is_over_taken = True
             
         return reward, reward_info

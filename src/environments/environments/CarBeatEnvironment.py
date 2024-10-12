@@ -39,7 +39,7 @@ class CarBeatEnvironment(CarTrackEnvironment):
         
         Reward:
             +2 if it comes within REWARD_RANGE units of a goal
-            +200 if it overtakes the Follow The Gap car
+            +100 if it overtakes the Follow The Gap car
             -25 if it collides with a wall
 
         Termination Conditions:
@@ -110,9 +110,11 @@ class CarBeatEnvironment(CarTrackEnvironment):
         self.OPPONENT_NAME = ftg_car_name
         # self.MAX_GOALS = max_goals # Unused
 
-        # Goal/Track Info -----------------------------------------------
+        
+        # Opponent & Overtaking -----------------------------------------------
         self.ftg_car_name = ftg_car_name
         self.is_over_taken = False
+        self.num_steps_over_taken = 0
         self.old_t_ego = None
         self.old_t_opponent = None
         self.t_ego_laps = 0
@@ -151,6 +153,7 @@ class CarBeatEnvironment(CarTrackEnvironment):
         )
 
         self.is_over_taken = False # Needs to come after the opponent vehicle is reset, or there may be an accidental "overtaking"
+        self.num_steps_over_taken = 0
         self.old_t_ego = None
         self.old_t_opponent = None
         self.t_ego_laps = 0
@@ -220,16 +223,20 @@ class CarBeatEnvironment(CarTrackEnvironment):
         elif abs(self.old_t_ego - t_ego) > 0.8:
             self.t_ego_laps += 1 if self.old_t_ego > t_ego else -1
 
-        self.is_first_reward_since_reset = False
-
-        print(f'Ego: {self.t_ego_laps + t_ego}, Opp: {self.t_opponent_laps + t_opponent}')
+        print(f'Ego: {self.t_ego_laps + t_ego}, Opp: {self.t_opponent_laps + t_opponent}, Steps Overtaken: {self.num_steps_over_taken}')
         if not self.is_over_taken and self.t_ego_laps + t_ego > self.t_opponent_laps + t_opponent:
+            self.num_steps_over_taken += 1
+        else:
+            self.num_steps_over_taken = 0
+        
+        if not self.is_over_taken and self.num_steps_over_taken > 5:
             print(f'RL Car has overtaken FTG Car')
             reward += 100
 
             # Ensure overtaking won't happen again
             self.is_over_taken = True
 
+        self.is_first_reward_since_reset = False
         self.old_t_ego = t_ego
         self.old_t_opponent = t_opponent
         

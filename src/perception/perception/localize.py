@@ -256,32 +256,32 @@ class CarLocalizer(Node):
       while self.image_queue:
         time, image_np = self.image_queue.popleft()
         cv2.imwrite(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/{time}.png", image_np)
-    
-    # Save pose estimates to debug directory
-    # generate df from pose_estimate_list
-    pose_est_df = pd.DataFrame(self.pose_estimate_list, columns=["time", "x", "y", "z", "roll", "pitch", "yaw"])
-    pose_est_df["time (sec)"] = pose_est_df["time"] / 1e9
-    # stabilise the roll, pitch, yaw values
-    pose_est_df = stabilise_euler_angles(pose_est_df, ["roll", "pitch", "yaw"])
-    pose_est_df.to_csv(f"{self.DEBUG_DIR}/pose_estimates.csv", index=False)
-    
+    else:
+      # Save pose estimates to debug directory
+      # generate df from pose_estimate_list
+      pose_est_df = pd.DataFrame(self.pose_estimate_list, columns=["time", "x", "y", "z", "roll", "pitch", "yaw"])
+      pose_est_df["time (sec)"] = pose_est_df["time"] / 1e9
+      # stabilise the roll, pitch, yaw values
+      pose_est_df = stabilise_euler_angles(pose_est_df, ["roll", "pitch", "yaw"])
+      pose_est_df.to_csv(f"{self.DEBUG_DIR}/pose_estimates.csv", index=False)
+      
 
-    gt_df = pd.DataFrame(self.ground_truth_pose_list, columns=["time", "x", "y", "z", "roll", "pitch", "yaw"])
-    gt_df["time (sec)"] = gt_df["time"] / 1e9
-    # stabilise the roll, pitch, yaw values
-    gt_df = stabilise_euler_angles(gt_df, ["roll", "pitch", "yaw"])
-    gt_df.to_csv(f"{self.DEBUG_DIR}/ground_truth.csv", index=False)
+      gt_df = pd.DataFrame(self.ground_truth_pose_list, columns=["time", "x", "y", "z", "roll", "pitch", "yaw"])
+      gt_df["time (sec)"] = gt_df["time"] / 1e9
+      # stabilise the roll, pitch, yaw values
+      gt_df = stabilise_euler_angles(gt_df, ["roll", "pitch", "yaw"])
+      gt_df.to_csv(f"{self.DEBUG_DIR}/ground_truth.csv", index=False)
 
-    # for each x,y,z,roll,pitch,yaw generate a plot with the pose estimate and the ground truth
-    for val in ["x", "y", "z", "roll", "pitch", "yaw"]:
-      plt.figure(figsize=(10, 10))
-      plt.xlabel("Time (s)")
-      plt.ylabel(val)
-      sns.lineplot(x="time (sec)", y=val, data=pose_est_df, label="Pose estimation")
-      sns.lineplot(x="time (sec)", y=val, data=gt_df, label="Ground truth")
-      plt.tight_layout()
-      plt.savefig(f"{self.DEBUG_DIR}/{val}.png")
-      plt.close()
+      # for each x,y,z,roll,pitch,yaw generate a plot with the pose estimate and the ground truth
+      for val in ["x", "y", "z", "roll", "pitch", "yaw"]:
+        plt.figure(figsize=(10, 10))
+        plt.xlabel("Time (s)")
+        plt.ylabel(val)
+        sns.lineplot(x="time (sec)", y=val, data=pose_est_df, label="Pose estimation")
+        sns.lineplot(x="time (sec)", y=val, data=gt_df, label="Ground truth")
+        plt.tight_layout()
+        plt.savefig(f"{self.DEBUG_DIR}/{val}.png")
+        plt.close()
     
     # Save camera parameters to debug directory
     np.savetxt(f"{self.DEBUG_DIR}/{self.SELECTED_CAMERA}/intrinsics.txt", self.color_intrinsics)

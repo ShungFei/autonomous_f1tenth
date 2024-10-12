@@ -405,7 +405,7 @@ class CarTrackEnvironment(F1tenthEnvironment):
         if self.is_evaluating and (terminated or truncated):
             self.eval_track_idx
 
-        print(f"Action: {lin_vel} | {steering_angle}")
+        # print(f"Action: {lin_vel} | {steering_angle}")
 
         return next_state, reward, terminated, truncated, info
 
@@ -567,12 +567,12 @@ class CarTrackEnvironment(F1tenthEnvironment):
                     close_to_wall_penalize_factor = 1 / (1 + np.exp(35 * (dist_to_wall - 0.35))) #y=\frac{1}{1+e^{35\left(x-0.35\right)}}
                     reward -= reward * close_to_wall_penalize_factor * weight
                     reward_info.update({"dist_to_wall":["avg",dist_to_wall]})
-                    print(f"--- Wall proximity penalty factor: {weight} * {close_to_wall_penalize_factor}")   
+                    # print(f"--- Wall proximity penalty factor: {weight} * {close_to_wall_penalize_factor}")   
                 case 'turn':
                     angular_vel_diff = abs(state[7] - next_state[7])
                     turning_penalty_factor = 1 - (1 / (1 + np.exp(12 * (angular_vel_diff - 0.35)))) #y=1-\frac{1}{1+e^{12\left(x-0.35\right)}}
                     reward -= reward * turning_penalty_factor * weight
-                    print(f"--- Turning penalty factor: {weight} * {turning_penalty_factor}")  
+                    # print(f"--- Turning penalty factor: {weight} * {turning_penalty_factor}")  
                 case 'lin_acc':
                     lin_vel_diff = abs(self.action_record[-1][0] - self.action_record[-2][0])
                     if lin_vel_diff > 0.2: #y=1\left\{x\ >\ 0.2\right\}
@@ -581,7 +581,7 @@ class CarTrackEnvironment(F1tenthEnvironment):
                         lin_acc_penalty_factor = 0
                     else: # y=(0.1-x)/(0.1-0.2)\ \left\{0.1\le x\le0.2\right\}
                         lin_acc_penalty_factor = (0.1-lin_vel_diff)/(0.1-0.2)
-                    print(f"--- Lin Acc penalty factor: {weight} * {lin_acc_penalty_factor}")  
+                    # print(f"--- Lin Acc penalty factor: {weight} * {lin_acc_penalty_factor}")  
                     reward -= reward * lin_acc_penalty_factor * weight
 
         return reward, reward_info
@@ -639,7 +639,7 @@ class CarTrackEnvironment(F1tenthEnvironment):
 
         reward += self.step_progress
 
-        print(f"Step progress: {self.step_progress}")
+        # print(f"Step progress: {self.step_progress}")
        
         self.steps_since_last_goal += 1
 

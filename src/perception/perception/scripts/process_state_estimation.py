@@ -1,3 +1,4 @@
+from typing import Literal
 import numpy as np
 from filterpy.kalman import KalmanFilter
 from filterpy.common import Q_discrete_white_noise
@@ -38,26 +39,28 @@ class StateEstimator():
       measured_poses.set_index("time", inplace=True)
       
       if self.method == "kalman_ca":
-        state_estimates = self.process_kalman_filter(measured_poses, is_constant_velocity_model=False)
+        state_estimates = self.process_kalman_filter(measured_poses, model="ca")
       elif self.method == "kalman_cv":
-        state_estimates = self.process_kalman_filter(measured_poses, is_constant_velocity_model=True)
+        state_estimates = self.process_kalman_filter(measured_poses, model="cv")
+      elif self.method == "kalman_cj":
+        state_estimates = self.process_kalman_filter(measured_poses, model="cj")
       elif self.method == "rwr":
         state_estimates = self.process_velocity_rolling_window_regression(measured_poses, window_size=5)
       elif self.method == "kalman_ca_depth_fusion":
-        state_estimates = self.process_kalman_filter(measured_poses, is_constant_velocity_model=False, is_depth_fusion=True)
+        state_estimates = self.process_kalman_filter(measured_poses, model="ca", is_depth_fusion=True)
       
       all_state_estimates.append(state_estimates)
       self.write_data(state_estimates, f"{process_sub_dir}/state_estimates_{self.method}.csv")
     
     return all_state_estimates
 
-  def process_kalman_filter(self, measured_poses, is_constant_velocity_model, is_depth_fusion=False):
+  def process_kalman_filter(self, measured_poses, model: Literal["cv", "ca", "cj"], is_depth_fusion=False):
     # Index is all potential time intervals between the first and last time in the measured poses
     expected_times_count = ceil((measured_poses.index[-1] - measured_poses.index[0]) / (1e9 / self.frame_rate))
     end_time = measured_poses.index[0] + expected_times_count * (1e9 / self.frame_rate)
     expected_times = np.linspace(measured_poses.index[0], end_time, expected_times_count + 1)
 
-    if is_constant_velocity_model:
+    if model == "cv":
       state_estimates = pd.DataFrame(columns=["tx", "ty", "tz",
                                               "vx", "vy", "vz",
                                               "roll", "pitch", "yaw",
@@ -72,33 +75,43 @@ class StateEstimator():
     state_estimates.index.name = "time"
     
     # Initialize the Kalman filter with the first pose
-    if is_constant_velocity_model:
+    if model == "cv":
       kf = self.initialize_kalman_filter_cv(1 / self.frame_rate, pose=measured_poses.iloc[0])
-    else:
+    elif model == "ca":
       kf = self.initialize_kalman_filter_ca(1 / self.frame_rate, pose=measured_poses.iloc[0])
+    else:
+      kf = self.initialize_kalman_filter_cj(1 / self.frame_rate, pose=measured_poses.iloc[0])
 
     for expected_time in state_estimates.index:
       kf.predict()
 
       # Update the Kalman filter with the closest measured pose before the expected time (within the interval of one frame)
       i = measured_poses.index.get_indexer([expected_time], method="ffill", tolerance=1e9 / self.frame_rate)[0]
-      
       # Skip the update step if there is no measured pose before the expected time
       if i != -1 and not pd.isna(measured_poses.iloc[i][["qx", "qy", "qz", "qw", "tx", "ty", "tz", "roll", "pitch", "yaw"]]).any():
         if is_depth_fusion:
-          # Update the measurement matrix to only update the position
-          kf.H[3:, 6 if is_constant_velocity_model else 9:9 if is_constant_velocity_model else 12] = np.zeros((3, 3))
-          
-          depth_position = measured_poses.iloc[i][["depth_tx", "depth_ty", "depth_tz"]].values
-          kf.update(np.concatenate((depth_position, np.zeros(3))))
-          
-          # Reset the measurement matrix to update position and orientation
-          kf.H[3:, 6 if is_constant_velocity_model else 9:9 if is_constant_velocity_model else 12] = np.eye(3)
+
+          depth_position: np.ndarray = measured_poses.iloc[i][["depth_tx", "depth_ty", "depth_tz"]].values
+
+          # check if the depth position is not nan
+          if not np.isnan(depth_position).any():
+            # Update the measurement matrix to only update the position
+            h_pos1 = 6 if model == "cv" else 9 if model == "ca" else 12
+            h_pos2 = 9 if model == "cv" else 12 if model == "ca" else 15
+
+            kf.H[3:, h_pos1: h_pos2] = np.zeros((3, 3))
+            kf.update(np.concatenate((depth_position, np.zeros(3))))
+            # Reset the measurement matrix to update position and orientation
+            kf.H[3:, h_pos1: h_pos2] = np.eye(3)
 
         pose = measured_poses.iloc[i][["tx", "ty", "tz", "roll", "pitch", "yaw"]].values
         kf.update(pose)
 
-      state_estimate = kf.x
+      if model == "cj":
+        # get the state estimate without the jerk if using constant jerk model
+        state_estimate = np.concatenate((kf.x[:9], kf.x[12:21]))
+      else:
+        state_estimate = kf.x
       state_estimates.loc[expected_time] = state_estimate
     
     return state_estimates
@@ -114,7 +127,7 @@ class StateEstimator():
     # State covariance
     kf.P = np.diag([1, 1, 1, 2, 2, 2, 1, 1, 1, 2, 2, 2])
     # Process noise
-    q = Q_discrete_white_noise(dim=2, dt=dt, var=0.05)
+    q = Q_discrete_white_noise(dim=2, dt=dt, var=5)
 
     q_second_order = np.array([[q[0, 0], 0, 0, q[0, 1], 0, 0],
                                 [0, q[0, 0], 0, 0, q[0, 1], 0],
@@ -127,7 +140,7 @@ class StateEstimator():
     kf.Q = block_diag(q_second_order, q_second_order)
     
     # Measurement noise
-    kf.R = np.eye(6) * 0.05
+    kf.R = np.diag([0.01, 0.01, 0.01, 0.02, 0.02, 0.02])
 
     # Transition matrix
     a_t = np.array([[1, 0, 0, dt, 0, 0],
@@ -173,10 +186,10 @@ class StateEstimator():
                                 [0, 0, q[2, 0], 0, 0, q[2, 1], 0, 0, q[2, 2]],
                                 ])
 
-    kf.Q = block_diag(q_second_order, q_second_order)
+    kf.Q = block_diag(q_second_order, 2 * q_second_order)
     
     # Measurement noise
-    kf.R = np.diag([0.05, 0.05, 0.05, 4, 4, 4])
+    kf.R = np.diag([0.1, 0.1, 0.1, 0.5, 0.5, 0.5])
 
     # Transition matrix
     a_t = np.array([[1, 0, 0, dt, 0, 0, 0.5*dt**2, 0, 0],
@@ -198,6 +211,63 @@ class StateEstimator():
     kf.H = np.zeros((6, 18))
     kf.H[:3, :3] = np.eye(3)
     kf.H[3:, 9:12] = np.eye(3)
+
+    return kf
+  
+  def initialize_kalman_filter_cj(self, dt, pose = np.zeros(6)):
+    """Constant jerk model Kalman filter"""
+    kf = KalmanFilter(dim_x=24, dim_z=6)
+
+    # State
+    kf.x = np.zeros(24)
+    kf.x[:3] = pose[:3]
+    kf.x[12:15] = pose[3:6]
+    # State covariance
+    kf.P = np.diag([1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4])
+    # Process noise
+    q = Q_discrete_white_noise(dim=4, dt=dt, var=50)
+
+    q_second_order = np.array([[q[0, 0], 0, 0, q[0, 1], 0, 0, q[0, 2], 0, 0, q[0, 3], 0, 0],
+                                [0, q[0, 0], 0, 0, q[0, 1], 0, 0, q[0, 2], 0, 0, q[0, 3], 0],
+                                [0, 0, q[0, 0], 0, 0, q[0, 1], 0, 0, q[0, 2], 0, 0, q[0, 3]],
+                                [q[1, 0], 0, 0, q[1, 1], 0, 0, q[1, 2], 0, 0, q[1, 3], 0, 0],
+                                [0, q[1, 0], 0, 0, q[1, 1], 0, 0, q[1, 2], 0, 0, q[1, 3], 0],
+                                [0, 0, q[1, 0], 0, 0, q[1, 1], 0, 0, q[1, 2], 0, 0, q[1, 3]],
+                                [q[2, 0], 0, 0, q[2, 1], 0, 0, q[2, 2], 0, 0, q[2, 3], 0, 0],
+                                [0, q[2, 0], 0, 0, q[2, 1], 0, 0, q[2, 2], 0, 0, q[2, 3], 0],
+                                [0, 0, q[2, 0], 0, 0, q[2, 1], 0, 0, q[2, 2], 0, 0, q[2, 3]],
+                                [q[3, 0], 0, 0, q[3, 1], 0, 0, q[3, 2], 0, 0, q[3, 3], 0, 0],
+                                [0, q[3, 0], 0, 0, q[3, 1], 0, 0, q[3, 2], 0, 0, q[3, 3], 0],
+                                [0, 0, q[3, 0], 0, 0, q[3, 1], 0, 0, q[3, 2], 0, 0, q[3, 3]],
+                                ])
+
+    kf.Q = block_diag(q_second_order, 2 * q_second_order)
+
+    # Measurement noise
+    kf.R = np.diag([0.1, 0.1, 0.1, 0.5, 0.5, 0.5])
+
+    # Transition matrix
+    a_t = np.array([[1, 0, 0, dt, 0, 0, 0.5*dt**2, 0, 0, (1/6)*dt**3, 0, 0],
+                    [0, 1, 0, 0, dt, 0, 0, 0.5*dt**2, 0, 0, (1/6)*dt**3, 0],
+                    [0, 0, 1, 0, 0, dt, 0, 0, 0.5*dt**2, 0, 0, (1/6)*dt**3],
+                    [0, 0, 0, 1, 0, 0, dt, 0, 0, 0.5*dt**2, 0, 0],
+                    [0, 0, 0, 0, 1, 0, 0, dt, 0, 0, 0.5*dt**2, 0],
+                    [0, 0, 0, 0, 0, 1, 0, 0, dt, 0, 0, 0.5*dt**2],
+                    [0, 0, 0, 0, 0, 0, 1, 0, 0, dt, 0, 0],
+                    [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, dt, 0],
+                    [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, dt],
+                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                    ])
+    kf.F = np.zeros((24, 24), dtype=a_t.dtype)
+    kf.F[:12, :12] = a_t
+    kf.F[12:, 12:] = a_t
+
+    # Measurement matrix
+    kf.H = np.zeros((6, 24))
+    kf.H[:3, :3] = np.eye(3)
+    kf.H[3:, 12:15] = np.eye(3)
 
     return kf
 
@@ -242,7 +312,7 @@ if __name__ == "__main__":
   group.add_argument("--latest", action="store_true", help="Process the relative opponent poses of the latest run in the perception_debug directory")
   group.add_argument("--all", action="store_true", help="Process the relative opponent poses of all runs in the perception_debug directory")
 
-  parser.add_argument("-m", "--method", type=str, required=True, choices=["kalman_ca", "kalman_cv", "rwr", "kalman_ca_depth_fusion"], help="Method to use for state estimation.")
+  parser.add_argument("-m", "--method", type=str, required=True, choices=["kalman_ca", "kalman_cv", "kalman_cj", "rwr", "kalman_ca_depth_fusion"], help="Method to use for state estimation.")
   parser.add_argument("--frame_rate", type=float, default=30, help="Frequency of the poses in the input data")
   parser.add_argument("--degrees", action="store_true", help="Output euler angles in degrees")
 

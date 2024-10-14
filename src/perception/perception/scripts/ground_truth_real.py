@@ -327,8 +327,13 @@ def correct_euler_offset(src_df: pd.DataFrame, compare_df: pd.DataFrame,
       src_df[src_col] = src_df[src_col] + 2 * diff
   return src_df
 
-def process_run_data(run_data: list[dict], measurements: GroundTruthMeasurements, smoothing_types: list[Literal["savgol", "rolling", "lowess"]] = [], degrees=True):
-  for run in run_data:
+def process_run_data(run_data: list[dict], measurements: GroundTruthMeasurements, 
+                     smoothing_types: list[Literal["savgol", "rolling", "lowess"]] = [],
+                     smoothing_params: list[list[SmoothingParams]] = None, degrees=True):
+  if smoothing_params is not None and len(run_data) != len(smoothing_params):
+    raise ValueError("The number of smoothing parameters should be the same as the number of runs")
+  
+  for i, run in enumerate(run_data):
     remove_nan_rows(run)
 
     run["tracking_df"] = remove_unused_frames(run["tracking_df"], run["start_time"])
@@ -374,7 +379,14 @@ def process_run_data(run_data: list[dict], measurements: GroundTruthMeasurements
         ["roll", "pitch", "yaw"],
         degrees=degrees
       )
-
+    for df_name in ["kalman_ca_df", "kalman_cv_df", "rwr_df", "kalman_ca_depth_fusion_df"]:
+      run[df_name] = correct_euler_offset(
+        run[df_name],
+        run["tracking_df"],
+        ["roll", "pitch", "yaw"],
+        degrees=degrees
+      )
+      
     # generate the average relative poses
     run["raw"]["rel_poses_avg_df"] = generate_avg_bev_df(
       run["raw"]["rel_poses_left_df"], run["raw"]["rel_poses_right_df"],
@@ -384,15 +396,27 @@ def process_run_data(run_data: list[dict], measurements: GroundTruthMeasurements
     for smoothing_type in smoothing_types:
       run[smoothing_type] = {}
       cols = ["tx", "ty", "tz", "roll", "pitch", "yaw"]
-      
+
       for df_name in run["raw"]:
-        params = []
-        for col in cols:
-          if col in ["tx", "ty", "tz"]:
-            params.append(SmoothingParams(lowess_frac=15 / len(run["raw"][df_name]), lowess_it=1))
-          else:
-            params.append(SmoothingParams(lowess_frac=10 / len(run["raw"][df_name]), lowess_it=1))
-        run[smoothing_type][df_name] = generate_smoothed_data(run["raw"][df_name], cols, params, smoothing_type)
+        if smoothing_params is None:
+          params = []
+          for col in cols:
+            if col in ["tx", "ty", "tz"]:
+              params.append(SmoothingParams(lowess_frac=15 / len(run["raw"][df_name]), lowess_it=1))
+            else:
+              params.append(SmoothingParams(lowess_frac=10 / len(run["raw"][df_name]), lowess_it=1))
+          run[smoothing_type][df_name] = generate_smoothed_data(run["raw"][df_name], cols, params, smoothing_type)
+        else:
+          # convert the smoothing parameters to a fraction based on the length of the DataFrame
+          params = [SmoothingParams(
+            rolling_window=param.rolling.window,
+            savgol_window=param.savgol.window,
+            savgol_polyorder=param.savgol.polyorder,
+            lowess_frac=param.lowess.frac / len(run["raw"][df_name]),
+            lowess_it=param.lowess.it
+          ) for param in smoothing_params[i]]
+
+          run[smoothing_type][df_name] = generate_smoothed_data(run["raw"][df_name], cols, params, smoothing_type)
 
   return run_data
 

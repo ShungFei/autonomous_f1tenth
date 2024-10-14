@@ -32,7 +32,7 @@ def locate_aruco_corners(image: np.ndarray, aruco_dictionary, corner_ref_method=
     return arucos
 
 def locate_aruco_poses(image: np.ndarray, aruco_dictionary, marker_obj_points, intrinsics, dist_coeffs, output_all=False,
-                        return_corners=False, corner_ref_method=cv2.aruco.CORNER_REFINE_APRILTAG
+                        return_corners=False, corner_ref_method=cv2.aruco.CORNER_REFINE_APRILTAG, pnp_method=cv2.SOLVEPNP_IPPE_SQUARE
                        ) -> tuple[dict[int, np.ndarray], tuple[np.ndarray, np.ndarray]]:
     """
     Returns a dictionary of detected ArUco markers and their poses
@@ -49,12 +49,12 @@ def locate_aruco_poses(image: np.ndarray, aruco_dictionary, marker_obj_points, i
         # tvec contains position of marker in camera frame
         if output_all:
           _, rvecs, tvecs, reproj_errors = cv2.solvePnPGeneric(marker_obj_points, marker, 
-                  new_intrinsics, None, flags=cv2.SOLVEPNP_IPPE_SQUARE)
+                  new_intrinsics, None, flags=pnp_method)
         
           aruco_poses[id] = (rvecs, tvecs, reproj_errors)
         else:
           _, rvec, tvec = cv2.solvePnP(marker_obj_points, marker, 
-                  new_intrinsics, None, flags=cv2.SOLVEPNP_IPPE_SQUARE)
+                  new_intrinsics, None, flags=pnp_method)
 
           # TODO: handle multiple markers of the same ID
           aruco_poses[id] = (rvec, tvec)

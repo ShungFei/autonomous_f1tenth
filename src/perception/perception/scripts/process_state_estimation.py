@@ -173,7 +173,7 @@ class StateEstimator():
     # State covariance
     kf.P = np.diag([1, 1, 1, 2, 2, 2, 3, 3, 3, 1, 1, 1, 2, 2, 2, 3, 3, 3])
     # Process noise
-    q = Q_discrete_white_noise(dim=3, dt=dt, var=10)
+    q = Q_discrete_white_noise(dim=3, dt=dt, var=30)
 
     q_second_order = np.array([[q[0, 0], 0, 0, q[0, 1], 0, 0, q[0, 2], 0, 0],
                                 [0, q[0, 0], 0, 0, q[0, 1], 0, 0, q[0, 2], 0],
@@ -189,7 +189,7 @@ class StateEstimator():
     kf.Q = block_diag(q_second_order, 2 * q_second_order)
     
     # Measurement noise
-    kf.R = np.diag([0.1, 0.1, 0.1, 0.5, 0.5, 0.5])
+    kf.R = np.diag([0.01, 0.01, 0.01, 0.2, 0.2, 0.2])
 
     # Transition matrix
     a_t = np.array([[1, 0, 0, dt, 0, 0, 0.5*dt**2, 0, 0],
